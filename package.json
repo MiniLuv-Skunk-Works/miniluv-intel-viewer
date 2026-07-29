@@ -1,0 +1,32 @@
+{
+  "name": "milf-viewer",
+  "productName": "MILF Viewer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MiniLuv Intel Live Feed - always-on-top scan viewer",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "^32.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "space.miniluv.milfviewer",
+    "productName": "MILF Viewer",
+    "artifactName": "MILF-Viewer-${version}.${ext}",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "preload.js", "renderer/**/*"],
+    "win": {
+      "icon": "build-icon.ico",
+      "target": [{ "target": "portable", "arch": ["x64"] }]
+    },
+    "portable": {
+      "artifactName": "MILF-Viewer-${version}.exe",
+      "unpackDirName": "milf-viewer"
+    },
+    "compression": "maximum"
+  }
+}
