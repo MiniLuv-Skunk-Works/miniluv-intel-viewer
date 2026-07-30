@@ -17,11 +17,25 @@
     "appId": "space.miniluv.milfviewer",
     "productName": "MILF Viewer",
     "artifactName": "MILF-Viewer-${version}.${ext}",
-    "directories": { "output": "dist" },
-    "files": ["main.js", "preload.js", "renderer/**/*"],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*"
+    ],
     "win": {
-      "icon": "build-icon.ico",
-      "target": [{ "target": "portable", "arch": ["x64"] }]
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     },
     "portable": {
       "artifactName": "MILF-Viewer-${version}.exe",

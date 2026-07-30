@@ -13,28 +13,34 @@ let pass = 0, fail = 0;
 const ok = (n, c, d) => c ? (pass++, console.log("  PASS  " + n))
                           : (fail++, console.log("  FAIL  " + n + (d ? "  -> " + d : "")));
 
-console.log("\n=== escaping click-through ===");
-// The trap: once the window ignores the mouse, the button that turns it off
-// is ignored too. Every route out must avoid clicking the window.
-ok("global hotkey registered", /globalShortcut\.register\(TOGGLE_HOTKEY/.test(main));
-ok("hotkey toggles rather than only enabling",
-   /globalShortcut\.register\(TOGGLE_HOTKEY, \(\) => setClickThrough\(!clickThrough\)\)/.test(main));
-ok("hotkey released on quit", /globalShortcut\.unregisterAll\(\)/.test(main));
-ok("failure to register is reported", /could not register/.test(main),
-   "another app may already own the combo");
-ok("tray menu can toggle it", /Click-through {2}\(" \+ TOGGLE_HOTKEY/.test(main));
-ok("tray menu rebuilds so its checkbox stays true",
-   /function rebuildTrayMenu/.test(main) && /rebuildTrayMenu\(\);/.test(main));
-ok("showing the window cancels click-through",
-   /win\.on\("show", \(\) => \{ if \(clickThrough\) setClickThrough\(false\)/.test(main),
-   "otherwise Show from the tray returns an inert window");
-ok("on-screen hint names the hotkey", /id="ctHint"/.test(html) && /ctHintKey/.test(html));
-ok("hint is shown only while active", /\$\("ctHint"\)\.className = d\.on \? "show" : ""/.test(html));
+console.log("\n=== click-through is gone ===");
+[main, pre, html].forEach(function (f, i) {
+  ok(["main.js", "preload.js", "renderer"][i] + " has no trace of it",
+     !/clickThrough|setIgnoreMouseEvents|globalShortcut|TOGGLE_HOTKEY/i.test(f));
+});
+
+console.log("\n=== transparency ===");
+ok("three levels defined", /body\.op0/.test(html) && /body\.op1/.test(html) && /body\.op2/.test(html));
+ok("default is not fully opaque", (function () {
+  const m = /body\.op1 \{ --bg: rgba\(16,17,19,\.(\d+)\)/.exec(html);
+  return m && Number(m[1]) < 90;
+})(), "asserting one exact alpha breaks on any tuning");
+ok("levels are visibly different", (function () {
+  const a = [...html.matchAll(/body\.op\d \{ --bg: rgba\(16,17,19,\.(\d+)\)/g)].map(x => Number(x[1]));
+  return a.length === 3 && Math.max(...a) - Math.min(...a) >= 30;
+})(), "0.78/0.80/0.62 was imperceptible");
+ok("cycles on click", /applyOpacity\(\(opLevel \+ 1\) % 3\)/.test(html));
+ok("preference is persisted", /ipcMain\.handle\("opacity"/.test(main) && /save\(\{ opacity/.test(main));
+ok("restored on launch", /applyOpacity\(st\.opacity/.test(html));
+ok("background only, not the whole window",
+   !/win\.setOpacity\(/.test(main.replace(/\/\/.*/g, "")),
+   "win.setOpacity would fade the text along with it");
+ok("detail panel follows the same alpha", /#detail \{[^}]*background: var\(--bg\)/.test(html));
 
 console.log("\n=== tray actually works ===");
 ok("icon file exists", fs.existsSync(path.join(__dirname, "renderer", "icon.png")),
    "makeTray fails silently without it, removing one escape route");
-ok("ico exists for the exe", fs.existsSync(path.join(__dirname, "build-icon.ico")));
+ok("ico exists for the exe", fs.existsSync(path.join(__dirname, "build", "icon.ico")));
 ok("tray failure is logged, not swallowed", /tray icon missing:/.test(main));
 
 console.log("\n=== detail popup ===");
@@ -62,10 +68,34 @@ ok("every invoke has a handler", [...invokes].every(i => handled.has(i)),
 ok("every relay has a listener", [...relayed].every(r => listened.has(r)),
    [...relayed].filter(r => !listened.has(r)).join(","));
 
+console.log("\n=== icons ===");
+const fsx = require("fs");
+ok("build/icon.ico exists where electron-builder looks",
+   fsx.existsSync(path.join(__dirname, "build", "icon.ico")),
+   "it silently falls back to the Electron default rather than erroring");
+ok("ico contains a 256px frame", (function () {
+  // electron-builder rejects ICOs without one, and Windows needs it for large views.
+  const buf = fsx.readFileSync(path.join(__dirname, "build", "icon.ico"));
+  const count = buf.readUInt16LE(4);
+  for (let i = 0; i < count; i++) {
+    const w = buf[6 + i * 16];
+    if (w === 0) return true;   // 0 encodes 256 in the ICO header
+  }
+  return false;
+})());
+ok("build config points at it", pkg.build.win.icon === "build/icon.ico", pkg.build.win.icon);
+ok("buildResources declared", pkg.build.directories.buildResources === "build");
+ok("window icon set separately from the exe icon",
+   /icon: path\.join\(__dirname, "renderer", "icon-256\.png"\)/.test(main),
+   "win.icon in the build config does nothing for the running window");
+ok("window icon is inside build.files",
+   pkg.build.files.some(f => f.startsWith("renderer")),
+   "build/ is buildResources - not present in the packaged app");
+
 console.log("\n=== packaging ===");
 ok("single portable exe, no installer",
    pkg.build.win.target[0].target === "portable", JSON.stringify(pkg.build.win.target));
-ok("icon wired into the build", pkg.build.win.icon === "build-icon.ico");
+ok("icon wired into the build", pkg.build.win.icon === "build/icon.ico");
 ok("build script present", !!pkg.scripts.build);
 ok("renderer assets included", pkg.build.files.includes("renderer/**/*"));
 

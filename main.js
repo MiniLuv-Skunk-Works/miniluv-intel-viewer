@@ -1,15 +1,15 @@
 "use strict";
-// M.I.L.F Viewer - MiniLuv Intel Live Feed
+// MILF Viewer - MiniLuv Intel Live Feed
 //
-// A borderless always-on-top window that sits over EVE and shows scans as
-// they're posted. Deliberately NOT an injected overlay: hooking DirectX to
-// draw inside the game client is the pattern CCP's EULA prohibits, and no
+// A borderless always-on-top window that sits over EVE and shows scans as they
+// are posted. Deliberately NOT an injected overlay: hooking DirectX to draw
+// inside the game client is the pattern CCP's EULA prohibits, and no
 // convenience is worth a SIG-wide ban. This is an ordinary window that floats.
 //
 // Works with windowed and borderless-fullscreen EVE. Exclusive fullscreen will
-// cover it - that's a limitation of not injecting, and the right trade.
+// cover it, which is the cost of not injecting.
 
-const { app, BrowserWindow, ipcMain, screen, shell, Tray, Menu, globalShortcut } = require("electron");
+const { app, BrowserWindow, ipcMain, screen, Tray, Menu } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
@@ -17,6 +17,12 @@ const http = require("http");
 const { URL } = require("url");
 
 const STORE = path.join(app.getPath("userData"), "settings.json");
+
+let win = null;
+let tray = null;
+let stream = null;
+let retryMs = 1000;
+let quitting = false;
 
 function load() {
   try { return JSON.parse(fs.readFileSync(STORE, "utf8")); } catch (e) { return {}; }
@@ -30,12 +36,6 @@ function save(patch) {
   return next;
 }
 
-let win = null;
-let tray = null;
-let stream = null;
-let retryMs = 1000;
-let clickThrough = false;
-
 function createWindow() {
   const saved = load();
   const area = screen.getPrimaryDisplay().workAreaSize;
@@ -48,10 +48,16 @@ function createWindow() {
     frame: false,
     transparent: true,
     resizable: true,
-    skipTaskbar: false,
     alwaysOnTop: true,
     minWidth: 280,
     minHeight: 200,
+    // The RUNNING window's taskbar icon. Separate from the exe icon that
+    // electron-builder stamps in - setting win.icon in the build config does
+    // nothing for this, which is why it still showed the Electron default.
+    //
+    // Must be a file inside build.files, or it won't exist in the packaged app.
+    // build/ is buildResources - available to the builder, not to the app.
+    icon: path.join(__dirname, "renderer", "icon-256.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -70,12 +76,13 @@ function createWindow() {
     const b = win.getBounds();
     save({ x: b.x, y: b.y, width: b.width, height: b.height });
   };
-  // Coming back from hidden always restores clicks. Otherwise "show" from the
-  // tray returns a window you still can't interact with.
-  win.on("show", () => { if (clickThrough) setClickThrough(false); });
   win.on("moved", remember);
   win.on("resized", remember);
-  win.on("closed", () => { win = null; });
+
+  // Closing the window ends the app. A tray-only survivor is exactly how you
+  // end up with a process you can't see, holding its temp directory open so
+  // the next `npm run build` fails.
+  win.on("closed", () => { win = null; if (!quitting) app.quit(); });
 }
 
 function makeTray() {
@@ -85,49 +92,22 @@ function makeTray() {
     console.warn("tray icon missing:", e.message);
     return;
   }
-  tray.setToolTip("M.I.L.F Viewer");
-  rebuildTrayMenu();
-  tray.on("click", () => { if (win) win.isVisible() ? win.hide() : win.show(); });
-}
-
-function rebuildTrayMenu() {
-  if (!tray) return;
+  tray.setToolTip("MILF Viewer");
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Show / hide", click: () => win && (win.isVisible() ? win.hide() : win.show()) },
-    { label: "Click-through  (" + TOGGLE_HOTKEY + ")", type: "checkbox", checked: clickThrough,
-      click: (item) => setClickThrough(item.checked) },
-    { type: "separator" },
+    { label: "Show", click: () => { if (win) { win.show(); win.focus(); } } },
     { label: "Clear feed", click: () => relay("clear") },
+    { type: "separator" },
+    { label: "Re-pair\u2026", click: () => relay("repair") },
     { label: "Reset position", click: () => {
-        const area = screen.getPrimaryDisplay().workAreaSize;
         if (!win) return;
+        const area = screen.getPrimaryDisplay().workAreaSize;
         win.setBounds({ x: area.width - 400, y: 40, width: 380, height: 460 });
         win.show();
       } },
     { type: "separator" },
-    { label: "Unpair", click: () => { save({ token: null }); relay("unpaired"); stop(); } },
     { label: "Quit", click: () => app.quit() }
   ]));
-}
-
-function setClickThrough(on) {
-  clickThrough = on;
-  if (!win) return;
-  // forward:true keeps move events flowing, so the renderer can still show a
-  // hint on hover even while clicks pass through.
-  win.setIgnoreMouseEvents(on, { forward: true });
-  relay("clickthrough", { on: on, hotkey: TOGGLE_HOTKEY });
-  if (tray) tray.setToolTip("M.I.L.F Viewer" + (on ? " - click-through ON (" + TOGGLE_HOTKEY + ")" : ""));
-  rebuildTrayMenu();
-}
-
-function registerHotkey() {
-  const okd = globalShortcut.register(TOGGLE_HOTKEY, () => setClickThrough(!clickThrough));
-  if (!okd) {
-    console.warn("could not register " + TOGGLE_HOTKEY + " - another app has it");
-    relay("status", { state: "hotkeyfail", detail: TOGGLE_HOTKEY });
-  }
-  return okd;
+  tray.on("click", () => { if (win) { win.show(); win.focus(); } });
 }
 
 function relay(channel, payload) {
@@ -135,16 +115,16 @@ function relay(channel, payload) {
 }
 
 // ── SSE client ──────────────────────────────────────────────
-// Hand-rolled rather than using EventSource, because a raw request can send
-// an Authorization header - EventSource can't, which would force the token
-// into the query string and therefore into the proxy's access log.
+// Hand-rolled rather than EventSource, because a raw request can send an
+// Authorization header - EventSource can't, which would force the token into
+// the query string and therefore into the proxy's access log.
 function connect() {
   const { serverUrl, token } = load();
   if (!serverUrl || !token) { relay("status", { state: "unpaired" }); return; }
 
   let target;
   try { target = new URL("/api/feed", serverUrl); }
-  catch (e) { relay("status", { state: "error", detail: "bad server URL" }); return; }
+  catch (e) { relay("status", { state: "error", detail: "bad server address" }); return; }
 
   const lib = target.protocol === "https:" ? https : http;
   relay("status", { state: "connecting" });
@@ -158,8 +138,10 @@ function connect() {
     }
   }, (res) => {
     if (res.statusCode === 401 || res.statusCode === 403) {
-      relay("status", { state: "unpaired", detail: "pairing rejected - pair again" });
+      // The token is dead. Clear it and say so, rather than retrying forever
+      // against a server that will never accept it.
       save({ token: null });
+      relay("status", { state: "unpaired", detail: "pairing expired - pair again" });
       res.resume();
       return;
     }
@@ -169,15 +151,13 @@ function connect() {
       return retry();
     }
 
-    retryMs = 1000;                       // a good connection resets the backoff
+    retryMs = 1000;
     relay("status", { state: "live" });
     res.setEncoding("utf8");
 
     let buffer = "";
     res.on("data", (chunk) => {
       buffer += chunk;
-      // Events are separated by a blank line; anything after the last one is
-      // a partial event and must stay in the buffer.
       let split;
       while ((split = buffer.indexOf("\n\n")) !== -1) {
         const raw = buffer.slice(0, split);
@@ -217,15 +197,14 @@ function stop() {
 
 function retry() {
   stop();
-  // Capped exponential backoff: a server restart shouldn't turn into a
-  // reconnect storm from every open viewer.
+  if (quitting) return;
   const wait = retryMs;
   retryMs = Math.min(retryMs * 2, 30000);
   relay("status", { state: "reconnecting", detail: Math.round(wait / 1000) + "s" });
-  setTimeout(() => { if (!app.isQuiting) connect(); }, wait);
+  setTimeout(() => { if (!quitting) connect(); }, wait);
 }
 
-// ── pairing, driven from the renderer ───────────────────────
+// ── ipc ─────────────────────────────────────────────────────
 ipcMain.handle("pair", async (_e, { serverUrl, code }) => {
   let target;
   try { target = new URL("/api/viewer/claim", serverUrl); }
@@ -247,6 +226,7 @@ ipcMain.handle("pair", async (_e, { serverUrl, code }) => {
         try { parsed = JSON.parse(out); } catch (e) {}
         if (res.statusCode === 200 && parsed.token) {
           save({ serverUrl: serverUrl, token: parsed.token });
+          retryMs = 1000;
           stop(); connect();
           resolve({ ok: true });
         } else {
@@ -260,22 +240,58 @@ ipcMain.handle("pair", async (_e, { serverUrl, code }) => {
   });
 });
 
+// Forget the token and show the pairing screen. Reachable from the header and
+// the tray at ALL times - not only when the server happens to reject us.
+// Otherwise a stale token plus an unreachable server leaves no way back in.
+ipcMain.handle("unpair", () => {
+  stop();
+  save({ token: null });
+  relay("unpaired");
+  relay("status", { state: "unpaired" });
+  return true;
+});
+
 ipcMain.handle("state", () => {
   const s = load();
-  return { paired: !!s.token, serverUrl: s.serverUrl || "", clickThrough: clickThrough };
+  return {
+    paired: !!s.token,
+    serverUrl: s.serverUrl || "",
+    // 0 solid / 1 default / 2 faint. The renderer applies it as a CSS class.
+    opacity: s.opacity == null ? 1 : s.opacity
+  };
 });
-ipcMain.handle("clickthrough", (_e, on) => { setClickThrough(!!on); return clickThrough; });
-ipcMain.handle("hotkey", () => TOGGLE_HOTKEY);
-ipcMain.handle("close", () => app.quit());
-ipcMain.handle("openExternal", (_e, url) => shell.openExternal(url));
 
-app.on("before-quit", () => { app.isQuiting = true; stop(); });
-app.on("will-quit", () => globalShortcut.unregisterAll());
-app.whenReady().then(() => {
-  createWindow();
-  makeTray();
-  registerHotkey();
-  connect();
-  app.on("activate", () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
+ipcMain.handle("opacity", (_e, level) => {
+  const n = Math.min(2, Math.max(0, Math.round(Number(level) || 0)));
+  save({ opacity: n });
+  return n;
 });
-app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+
+ipcMain.handle("close", () => app.quit());
+
+// ── lifecycle ───────────────────────────────────────────────
+// Without a single-instance lock, launching again while one is running gives
+// two processes fighting over the same window position - and leaves file
+// handles that make the next `npm run build` fail with EBUSY on dist/.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (win) { win.show(); win.focus(); }
+  });
+
+  app.on("before-quit", () => {
+    quitting = true;
+    stop();
+    if (tray) { tray.destroy(); tray = null; }
+  });
+
+  app.on("window-all-closed", () => app.quit());
+
+  app.whenReady().then(() => {
+    createWindow();
+    makeTray();
+    connect();
+  });
+}
