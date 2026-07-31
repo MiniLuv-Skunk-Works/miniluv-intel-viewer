@@ -69,6 +69,13 @@
   .row1 { display: flex; align-items: baseline; gap: 6px; }
   .hull { font-weight: 700; font-size: 14px; }
   .sys { color: var(--blue); font-weight: 600; }
+  /* Truncates rather than pushing the age and BUMP button off the row. The
+     window can be dragged down to 280px and that button has to stay reachable. */
+  .pilot { color: var(--blue); font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .hull { flex: 0 0 auto; }
+  .row1 .age { flex: 0 0 auto; }
+  .row1 .bumpbtn { flex: 0 0 auto; }
   .age { margin-left: auto; color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
   .age.stale { color: var(--amber); }
   .age.dead { color: var(--red); }
@@ -272,7 +279,7 @@
       return '<div class="scan" data-at="' + s.at + '" data-id="' + esc(s.id) + '">' +
         '<div class="row1">' +
           '<span class="hull">' + esc(s.hull || "Unknown") + '</span>' +
-          '<span class="sys">' + esc(s.system || "?") + '</span>' +
+          (s.pilot ? '<span class="pilot">(' + esc(s.pilot) + ')</span>' : "") +
           '<span class="age">&mdash;</span>' +
           '<button class="bumpbtn" data-bump="' + esc(s.id) + '" title="Start or refresh the bump timer">BUMP</button>' +
         '</div>' +
@@ -288,7 +295,7 @@
         (fleet ? '<div class="fleet">' + fleet + "</div>" : "") +
         (route ? '<div class="meta">' + route + "</div>" : "") +
         '<div class="meta">' + esc(s.scout || "?") +
-          (s.pilot ? " \u00B7 target " + esc(s.pilot) : "") +
+          (s.system ? " \u00B7 scanned in " + esc(s.system) : "") +
           (s.sec ? " \u00B7 " + esc(s.sec) + " " + esc(s.prepped || "") : "") + '</div>' +
         (s.notes ? '<div class="notes">' + esc(s.notes) + "</div>" : "") +
       "</div>";
@@ -420,10 +427,22 @@
   setInterval(paintBumps, 250);
 
   function sendBump(id) {
+    var btn = document.querySelector('[data-bump="' + id + '"]');
+    if (btn) { btn.disabled = true; btn.textContent = "\u2026"; }
     window.milf.bump(id).then(function (r) {
-      if (r && r.ok === false) setStatus({ state: "error", detail: r.error || "bump failed" });
+      if (btn) { btn.disabled = false; btn.textContent = "BUMP"; }
+      if (r && r.ok === false) {
+        setStatus({ state: "error", detail: r.error || "bump failed" });
+        // Long enough to actually read - a two-second flash of an error you
+        // then have to reproduce is worse than no error.
+        clearTimeout(bumpErrTimer);
+        bumpErrTimer = setTimeout(function () {
+          setStatus({ state: "live" });
+        }, 12000);
+      }
     });
   }
+  var bumpErrTimer = null;
 
   window.milf.onBump(function (b) {
     bumps[b.scanId] = b;

@@ -298,6 +298,20 @@ ipcMain.handle("bump", async (_e, scanId) => {
         if (res.statusCode === 200) return resolve({ ok: true });
         let parsed = {};
         try { parsed = JSON.parse(out); } catch (e) {}
+
+        // A 404 has two very different causes and they need different advice.
+        // Fastify's own not-found handler emits {error:"Not Found", message:
+        // "Route POST:/api/viewer/bump not found"} - that means the DASHBOARD
+        // predates bumping. Our handler emits {error:"unknown_scan"}, which
+        // means the scan aged out of the feed. Reporting both as "Not Found"
+        // sends people looking in the wrong place.
+        if (res.statusCode === 404 && !parsed.detail &&
+            /not found/i.test(String(parsed.message || ""))) {
+          return resolve({
+            ok: false,
+            error: "This dashboard doesn't support bumping yet - it needs updating."
+          });
+        }
         resolve({ ok: false, error: parsed.detail || parsed.error || ("HTTP " + res.statusCode) });
       });
     });

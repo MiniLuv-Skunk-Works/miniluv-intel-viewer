@@ -82,6 +82,28 @@ ok("timer comes from the feed, not the POST response",
    "the bumper must see the same clock as everyone else");
 ok("cleared bumps hide the row", /onBumpCleared/.test(html) && /bumpCleared/.test(main));
 
+console.log("\n=== entry layout ===");
+// Once a gank is called the FC knows the system; what they need on the title
+// line is the name they are looking for on grid.
+ok("pilot on the title line, in parens", /class="pilot">\(/.test(html));
+ok("pilot omitted cleanly when unknown", /s\.pilot \?/.test(html),
+   "empty parens would be worse than nothing");
+ok("system moved to the meta line", /scanned in " \+ esc\(s\.system\)/.test(html));
+ok("system no longer on the title line", !/class="sys">' \+ esc\(s\.system/.test(html));
+ok("pilot truncates instead of shoving the controls off",
+   /\.pilot \{[^}]*text-overflow: ellipsis/.test(html),
+   "the window can be dragged to 280px and BUMP must stay reachable");
+
+console.log("\n=== bump failures are diagnosable ===");
+// "Not Found" told the user nothing and pointed at the wrong component.
+ok("a missing route is named as an out-of-date dashboard",
+   /doesn't support bumping yet/.test(main));
+ok("distinguished from a scan that aged out",
+   /!parsed\.detail &&/.test(main) && /not found\/i\.test/.test(main),
+   "both are 404s with completely different fixes");
+ok("the button shows it is working", /btn\.disabled = true/.test(html));
+ok("errors stay on screen long enough to read", /12000/.test(html));
+
 console.log("\n=== ipc surface is complete ===");
 const invokes = new Set([...pre.matchAll(/ipcRenderer\.invoke\("(\w+)"/g)].map(m => m[1]));
 const handled = new Set([...main.matchAll(/ipcMain\.handle\("(\w+)"/g)].map(m => m[1]));
