@@ -188,6 +188,8 @@ function handleEvent(raw) {
   let parsed;
   try { parsed = JSON.parse(data); } catch (e) { return; }
   if (event === "scan") relay("scan", parsed);
+  else if (event === "bump") relay("bump", parsed);
+  else if (event === "bumpCleared") relay("bumpCleared", parsed);
   else if (event === "hello") relay("status", { state: "live", detail: parsed.name });
 }
 
@@ -265,6 +267,44 @@ ipcMain.handle("opacity", (_e, level) => {
   const n = Math.min(2, Math.max(0, Math.round(Number(level) || 0)));
   save({ opacity: n });
   return n;
+});
+
+// Bumping is the viewer's only write. It goes out with the same bearer token
+// the feed uses, so a paired viewer can bump and an unpaired one cannot.
+ipcMain.handle("bump", async (_e, scanId) => {
+  const { serverUrl, token } = load();
+  if (!serverUrl || !token) return { ok: false, error: "not paired" };
+  let target;
+  try { target = new URL("/api/viewer/bump", serverUrl); }
+  catch (e) { return { ok: false, error: "bad server address" }; }
+
+  const lib = target.protocol === "https:" ? https : http;
+  const body = JSON.stringify({ scanId: scanId });
+  return new Promise((resolve) => {
+    const req = lib.request(target, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+        "Authorization": "Bearer " + token
+      }
+    }, (res) => {
+      let out = "";
+      res.setEncoding("utf8");
+      res.on("data", d => { out += d; });
+      res.on("end", () => {
+        // The timer itself arrives over the feed, not from this response -
+        // so the bumper sees exactly what everyone else sees, at the same time.
+        if (res.statusCode === 200) return resolve({ ok: true });
+        let parsed = {};
+        try { parsed = JSON.parse(out); } catch (e) {}
+        resolve({ ok: false, error: parsed.detail || parsed.error || ("HTTP " + res.statusCode) });
+      });
+    });
+    req.on("error", (e) => resolve({ ok: false, error: e.message }));
+    req.write(body);
+    req.end();
+  });
 });
 
 ipcMain.handle("close", () => app.quit());

@@ -58,6 +58,30 @@ ok("clearing closes an open detail view",
    /scans = \[\];\s*\n\s*\$\("detail"\)\.className = "";/.test(html),
    "otherwise the popup shows a scan that's no longer in the list");
 
+console.log("\n=== bump timers ===");
+ok("BUMP button on each entry", /data-bump="/.test(html));
+ok("button click doesn't open the detail popup",
+   /e\.target\.hasAttribute\("data-bump"\)\s*\)\s*return/.test(html),
+   "the button sits inside the row, which is itself clickable");
+ok("countdown row per scan", /data-bumprow="/.test(html));
+ok("counts DOWN, not up", /var left = b\.holdMs - elapsed/.test(html) &&
+   /left <= 0 \? "OUT"/.test(html),
+   "an FC wants how long is left, not how long it has been");
+ok("goes amber then red", /" warn"/.test(html) && /" gone"/.test(html));
+ok("amber is a fixed 30s, not a fraction of the hold", /left <= 30000/.test(html),
+   "a percentage would go amber a full minute early on a 180s bump");
+ok("reads as m:ss above a minute", /padStart\(2, "0"\)/.test(html),
+   "\"2:45\" is easier to call than \"165s\"");
+ok("shows OUT when the hold lapses", /"OUT"/.test(html));
+ok("names the bumper and the re-bump count", /b\.by \+/.test(html) && /b\.count > 1/.test(html));
+ok("timers survive a re-render", /paintBumps\(\);\s*\/\/ a re-render/.test(html),
+   "the scan list redraws on every new scan");
+ok("bump sent with the viewer token", /"Authorization": "Bearer " \+ token/.test(main));
+ok("timer comes from the feed, not the POST response",
+   /The timer itself arrives over the feed/.test(main),
+   "the bumper must see the same clock as everyone else");
+ok("cleared bumps hide the row", /onBumpCleared/.test(html) && /bumpCleared/.test(main));
+
 console.log("\n=== ipc surface is complete ===");
 const invokes = new Set([...pre.matchAll(/ipcRenderer\.invoke\("(\w+)"/g)].map(m => m[1]));
 const handled = new Set([...main.matchAll(/ipcMain\.handle\("(\w+)"/g)].map(m => m[1]));
