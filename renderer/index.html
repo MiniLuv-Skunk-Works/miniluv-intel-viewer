@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<title>M.I.L.F Viewer</title>
+<style>
+  /* Sits over a game, so: dark, high contrast, no wasted vertical space.
+     Nothing here should need a second look to read. */
+  /* Three background alphas rather than one guess - how transparent is
+     comfortable depends entirely on what's behind it. Only the BACKGROUND
+     fades; text stays fully opaque, which is why this is CSS rather than
+     Electron's setOpacity(). */
+  :root {
+    --bg: rgba(16,17,19,.80);
+    --line: #2b2d31;
+    --text: #e8e9ea;
+    --dim: #8b8e93;
+    --blue: #4a9eff;
+    --green: #42b72a;
+    --amber: #e8a33d;
+    --red: #fa383e;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body.op0 { --bg: rgba(16,17,19,.94); }   /* solid   - reading a fit */
+  body.op1 { --bg: rgba(16,17,19,.72); }   /* default - over the game */
+  body.op2 { --bg: rgba(16,17,19,.44); }   /* faint   - barely there */
+  body {
+    font: 13px/1.4 "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--text); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px;
+    display: flex; flex-direction: column;
+    user-select: none;
+  }
+
+  header {
+    -webkit-app-region: drag;          /* the whole bar is the grab handle */
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 8px 7px 11px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(0,0,0,.18);
+  }
+  .brand { font-weight: 800; letter-spacing: .5px; font-size: 12px; }
+  .brand small { color: var(--dim); font-weight: 600; letter-spacing: 0; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: 0 0 auto; }
+  .dot.live { background: var(--green); }
+  .dot.warn { background: var(--amber); }
+  .dot.bad  { background: var(--red); }
+  .spacer { flex: 1; }
+  header button {
+    -webkit-app-region: no-drag;
+    background: transparent; border: 1px solid var(--line); color: var(--dim);
+    border-radius: 4px; font-size: 11px; padding: 3px 7px; cursor: pointer;
+  }
+  header button:hover { color: var(--text); border-color: var(--dim); }
+  header button.on { color: #fff; background: var(--blue); border-color: var(--blue); }
+
+  #status { font-size: 11px; color: var(--dim); padding: 4px 11px; border-bottom: 1px solid var(--line); }
+  #status.hidden { display: none; }
+
+  main { flex: 1; overflow-y: auto; overflow-x: hidden; }
+  main::-webkit-scrollbar { width: 8px; }
+  main::-webkit-scrollbar-thumb { background: #34363a; border-radius: 4px; }
+
+  .scan { padding: 8px 11px; border-bottom: 1px solid var(--line); }
+  .scan:first-child { background: rgba(74,158,255,.07); }
+  .row1 { display: flex; align-items: baseline; gap: 6px; }
+  .hull { font-weight: 700; font-size: 14px; }
+  .sys { color: var(--blue); font-weight: 600; }
+  .age { margin-left: auto; color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .age.stale { color: var(--amber); }
+  .age.dead { color: var(--red); }
+  .row2 { display: flex; gap: 10px; margin-top: 3px; font-size: 12px; flex-wrap: wrap; }
+  .val { font-weight: 700; }
+  .val.t1 { color: var(--dim); }
+  .val.t2 { color: var(--green); }
+  .val.t3 { color: var(--amber); }
+  .val.t4 { color: var(--red); }
+  .ehp { color: var(--dim); }
+  .fleet { margin-top: 4px; font-size: 11px; color: var(--dim);
+           font-family: Consolas, monospace; }
+  .fleet b { color: var(--text); font-weight: 700; }
+  .meta { margin-top: 3px; font-size: 11px; color: var(--dim); }
+  .notes { margin-top: 3px; font-size: 11px; color: var(--amber); }
+
+  .empty { padding: 22px 14px; text-align: center; color: var(--dim); font-size: 12px; }
+
+  /* pairing */
+  /* detail popup */
+  #detail { position: absolute; inset: 0; background: var(--bg);
+            display: none; flex-direction: column; z-index: 20; }
+  #detail.show { display: flex; }
+  #detail header { -webkit-app-region: no-drag; }
+  #detail .body { flex: 1; overflow-y: auto; padding: 10px 12px; }
+  #detail h3 { margin: 12px 0 5px; font-size: 11px; text-transform: uppercase;
+               letter-spacing: .6px; color: var(--dim); }
+  #detail h3:first-child { margin-top: 0; }
+  #detail pre { margin: 0; font: 11px/1.45 Consolas, monospace; white-space: pre-wrap;
+                word-break: break-word; background: #17181a; border: 1px solid var(--line);
+                border-radius: 5px; padding: 8px; }
+  #detail .kv { font-size: 12px; margin: 2px 0; }
+  #detail .kv b { color: var(--dim); font-weight: 600; display: inline-block; min-width: 66px; }
+  .scan { cursor: pointer; }
+  .scan:hover { background: rgba(255,255,255,.045); }
+
+  /* click-through hint - the window ignores clicks, so this has to say how to get out */
+  #pair { padding: 14px; display: none; }
+  #pair.show { display: block; }
+  #pair h2 { margin: 0 0 4px; font-size: 14px; }
+  #pair p { margin: 0 0 10px; font-size: 11px; color: var(--dim); line-height: 1.5; }
+  #pair label { display: block; font-size: 11px; color: var(--dim); margin: 8px 0 3px; }
+  #pair input {
+    width: 100%; padding: 7px 8px; font-size: 13px;
+    background: #202226; border: 1px solid var(--line); border-radius: 4px; color: var(--text);
+  }
+  #pair input#code { font-family: Consolas, monospace; letter-spacing: 2px; text-transform: uppercase; }
+  #pair button {
+    -webkit-app-region: no-drag;
+    width: 100%; margin-top: 11px; padding: 8px; font-size: 13px; font-weight: 700;
+    background: var(--blue); color: #fff; border: 0; border-radius: 4px; cursor: pointer;
+  }
+  #pair button:disabled { opacity: .55; cursor: wait; }
+  #pairErr { margin-top: 8px; font-size: 11px; color: var(--red); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="dot" id="dot"></div>
+  <div class="brand">M.I.L.F <small>viewer</small></div>
+  <div class="spacer"></div>
+  <button id="clearBtn" title="Clear the feed">clear</button>
+  <button id="opBtn" title="Cycle window transparency">opacity</button>
+  <button id="repairBtn" title="Forget this pairing and enter a new code">re-pair</button>
+  <button id="quitBtn" title="Quit">&times;</button>
+</header>
+
+<div id="status" class="hidden"></div>
+
+<main id="list">
+  <div class="empty" id="empty">Waiting for scans&hellip;</div>
+</main>
+
+<div id="detail">
+  <header>
+    <div class="brand" id="detailTitle">&mdash;</div>
+    <div class="spacer"></div>
+    <button id="detailClose">back</button>
+  </header>
+  <div class="body" id="detailBody"></div>
+</div>
+
+<div id="pair">
+  <h2>Pair this viewer</h2>
+  <p>In the dashboard, open <b>Pair viewer</b> and enter the code it shows.
+     The code is single-use and expires in five minutes.</p>
+  <label for="server">Dashboard address</label>
+  <input id="server" placeholder="https://dunk.example.com" spellcheck="false">
+  <label for="code">Pairing code</label>
+  <input id="code" placeholder="ABCD-EFGH" maxlength="9" spellcheck="false">
+  <button id="pairBtn">Pair</button>
+  <div id="pairErr"></div>
+  <div style="margin-top:10px;text-align:center">
+    <a href="#" id="pairCancel" style="font-size:11px;color:var(--dim)">back to the feed</a>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var scans = [];
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function isk(n) {
+    if (n == null || isNaN(n)) return null;
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
+    if (n >= 1e6) return (n / 1e6).toFixed(0) + "M";
+    return Math.round(n).toLocaleString();
+  }
+  function ehpFmt(n) {
+    if (n == null || isNaN(n)) return null;
+    return n >= 1e6 ? (n / 1e6).toFixed(2) + "m" : (n / 1e3).toFixed(0) + "k";
+  }
+  // Value tier drives the colour, so a 3B target is distinguishable from a
+  // 200M one without reading the number.
+  function tier(v) {
+    if (v == null) return "t1";
+    if (v >= 3e9) return "t4";
+    if (v >= 1e9) return "t3";
+    if (v >= 5e8) return "t2";
+    return "t1";
+  }
+  function ageText(ms) {
+    var s = Math.max(0, Math.floor(ms / 1000));
+    if (s < 60) return s + "s";
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + "m " + (s % 60) + "s";
+    return Math.floor(m / 60) + "h " + (m % 60) + "m";
+  }
+
+  function openDetail(id) {
+    var s = scans.filter(function (x) { return x.id === id; })[0];
+    if (!s) return;
+    $("detailTitle").textContent = (s.hull || "Unknown") + "  \u00B7  " + (s.system || "?");
+    var h = "";
+    var kv = function (k, v) { return v ? '<div class="kv"><b>' + k + '</b>' + esc(v) + "</div>" : ""; };
+    h += kv("Scout", s.scout);
+    h += kv("Pilot", s.pilot);
+    h += kv("Route", [s.scanGate ? s.scanGate + " gate" : null,
+                      s.headGate ? "\u2192 " + s.headGate : null].filter(Boolean).join("  "));
+    h += kv("Value", [isk(s.valueSplit) ? isk(s.valueSplit) + " split" : null,
+                      isk(s.valueSell) ? isk(s.valueSell) + " sell" : null,
+                      isk(s.valueBuy) ? isk(s.valueBuy) + " buy" : null].filter(Boolean).join("  /  "));
+    h += kv("Droppable", isk(s.droppableSplit) ? isk(s.droppableSplit) + " split" : "");
+    h += kv("Tank", ehpFmt(s.ehp) ? ehpFmt(s.ehp) + " EHP" + (s.ammo ? " vs " + s.ammo : "") : "");
+    if ((s.fleetAll || []).length) {
+      h += "<h3>Fleet needed" + (s.sec ? " \u2014 " + esc(s.sec) + ", " + esc(s.prepped || "") : "") + "</h3>";
+      h += "<pre>" + s.fleetAll.map(function (f) {
+        return esc(String(f.name).padEnd(9)) + String(f.ships).padStart(4);
+      }).join("\n") + "</pre>";
+    }
+    if (s.fitEft) h += "<h3>Fit \u2014 paste into Pyfa</h3><pre>" + esc(s.fitEft) + "</pre>";
+    if ((s.cargoList || []).length) {
+      h += "<h3>Cargo</h3><pre>" + s.cargoList.map(function (c) {
+        return String(Number(c.qty).toLocaleString()).padStart(11) + "  " + esc(c.name);
+      }).join("\n") + "</pre>";
+    }
+    if (s.notes) h += "<h3>Notes</h3><pre>" + esc(s.notes) + "</pre>";
+    if (!s.fitEft && !(s.cargoList || []).length) {
+      h += '<h3>Fit &amp; cargo</h3><div class="kv" style="color:var(--dim)">' +
+           "Not included in this scan.</div>";
+    }
+    $("detailBody").innerHTML = h;
+    $("detail").className = "show";
+  }
+
+  function render() {
+    var list = $("list");
+    if (!scans.length) {
+      list.innerHTML = '<div class="empty">Waiting for scans&hellip;</div>';
+      return;
+    }
+    list.innerHTML = scans.map(function (s) {
+      var sell = isk(s.valueSell);
+      var ehp = ehpFmt(s.ehp);
+      var fleet = (s.fleetAll || []).slice(0, 4)
+        .map(function (f) { return "<b>" + esc(f.ships) + "</b> " + esc(f.name); }).join("  ");
+      var route = [s.scanGate ? esc(s.scanGate) + " gate" : null,
+                   s.headGate ? "\u2192 " + esc(s.headGate) : null].filter(Boolean).join("  ");
+      return '<div class="scan" data-at="' + s.at + '" data-id="' + esc(s.id) + '">' +
+        '<div class="row1">' +
+          '<span class="hull">' + esc(s.hull || "Unknown") + '</span>' +
+          '<span class="sys">' + esc(s.system || "?") + '</span>' +
+          '<span class="age">&mdash;</span>' +
+        '</div>' +
+        '<div class="row2">' +
+          (sell ? '<span class="val ' + tier(s.valueSell) + '">' + sell + '</span>' : "") +
+          (ehp ? '<span class="ehp">' + ehp + ' EHP' + (s.ammo ? " vs " + esc(s.ammo) : "") + '</span>' : "") +
+        '</div>' +
+        (fleet ? '<div class="fleet">' + fleet + "</div>" : "") +
+        (route ? '<div class="meta">' + route + "</div>" : "") +
+        '<div class="meta">' + esc(s.scout || "?") +
+          (s.pilot ? " \u00B7 target " + esc(s.pilot) : "") +
+          (s.sec ? " \u00B7 " + esc(s.sec) + " " + esc(s.prepped || "") : "") + '</div>' +
+        (s.notes ? '<div class="notes">' + esc(s.notes) + "</div>" : "") +
+      "</div>";
+    }).join("");
+    Array.prototype.forEach.call(list.querySelectorAll(".scan"), function (el) {
+      el.addEventListener("click", function () { openDetail(el.getAttribute("data-id")); });
+    });
+    tick();
+  }
+
+  // Ages count up live - the thing you actually want to know at a glance is
+  // how stale the intel is, and a fixed timestamp makes you do arithmetic.
+  function tick() {
+    var now = Date.now();
+    Array.prototype.forEach.call(document.querySelectorAll(".scan"), function (el) {
+      var age = now - Number(el.getAttribute("data-at"));
+      var span = el.querySelector(".age");
+      span.textContent = ageText(age);
+      span.className = "age" + (age > 15 * 60e3 ? " dead" : age > 5 * 60e3 ? " stale" : "");
+    });
+  }
+  setInterval(tick, 1000);
+
+  function setStatus(s) {
+    var dot = $("dot"), bar = $("status");
+    var map = { live: "live", connecting: "warn", reconnecting: "warn", offline: "bad", error: "bad", unpaired: "" };
+    dot.className = "dot " + (map[s.state] || "");
+    if (s.state === "live") { bar.className = "hidden"; }
+    else {
+      bar.className = "";
+      bar.textContent = ({
+        connecting: "Connecting\u2026",
+        reconnecting: "Connection lost \u2014 retrying in " + (s.detail || "a moment"),
+        offline: "Can't reach the dashboard" + (s.detail ? " (" + s.detail + ")" : ""),
+        error: s.detail || "Error",
+        unpaired: s.detail || "Not paired"
+      })[s.state] || s.state;
+    }
+    if (s.state === "unpaired") showPair(true);
+  }
+
+  function showPair(on) {
+    $("pair").className = on ? "show" : "";
+    $("list").style.display = on ? "none" : "";
+  }
+
+  $("pairBtn").addEventListener("click", function () {
+    var btn = this;
+    var server = $("server").value.trim();
+    var code = $("code").value.trim();
+    if (!server || !code) { $("pairErr").textContent = "Both fields are needed."; return; }
+    btn.disabled = true; btn.textContent = "Pairing\u2026";
+    $("pairErr").textContent = "";
+    window.milf.pair(server, code).then(function (r) {
+      btn.disabled = false; btn.textContent = "Pair";
+      if (r.ok) { showPair(false); $("code").value = ""; }
+      else $("pairErr").textContent = r.error || "Pairing failed.";
+    });
+  });
+
+  var opLevel = 1;
+  function applyOpacity(n) {
+    opLevel = n;
+    document.body.className = "op" + n;
+    $("opBtn").textContent = ["solid", "opacity", "faint"][n];
+  }
+  $("opBtn").addEventListener("click", function () {
+    applyOpacity((opLevel + 1) % 3);
+    window.milf.setOpacity(opLevel);
+  });
+  $("quitBtn").addEventListener("click", function () { window.milf.quit(); });
+  $("pairCancel").addEventListener("click", function (e) {
+    e.preventDefault();
+    showPair(false);
+  });
+  $("detailClose").addEventListener("click", function () { $("detail").className = ""; });
+  $("repairBtn").addEventListener("click", function () {
+    window.milf.unpair().then(function () { showPair(true); });
+  });
+  window.milf.onRepair(function () { showPair(true); });
+  $("clearBtn").addEventListener("click", function () {
+    scans = [];
+    $("detail").className = "";
+    render();
+  });
+  window.milf.onClear(function () { scans = []; $("detail").className = ""; render(); });
+
+
+  window.milf.onScan(function (s) {
+    scans.unshift(s);
+    if (scans.length > 40) scans.pop();
+    render();
+  });
+  window.milf.onStatus(setStatus);
+  window.milf.onUnpaired(function () { scans = []; render(); showPair(true); });
+
+  window.milf.state().then(function (st) {
+    if (st.serverUrl) $("server").value = st.serverUrl;
+    applyOpacity(st.opacity == null ? 1 : st.opacity);
+    showPair(!st.paired);
+  });
+})();
+</script>
+</body>
+</html>
