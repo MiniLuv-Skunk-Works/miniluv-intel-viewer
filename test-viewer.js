@@ -58,6 +58,52 @@ ok("clearing closes an open detail view",
    /scans = \[\];\s*\n\s*\$\("detail"\)\.className = "";/.test(html),
    "otherwise the popup shows a scan that's no longer in the list");
 
+console.log("\n=== bump timers ===");
+ok("BUMP button on each entry", /data-bump="/.test(html));
+ok("button click doesn't open the detail popup",
+   /e\.target\.hasAttribute\("data-bump"\)\s*\)\s*return/.test(html),
+   "the button sits inside the row, which is itself clickable");
+ok("countdown row per scan", /data-bumprow="/.test(html));
+ok("counts DOWN, not up", /var left = b\.holdMs - elapsed/.test(html) &&
+   /left <= 0 \? "OUT"/.test(html),
+   "an FC wants how long is left, not how long it has been");
+ok("goes amber then red", /" warn"/.test(html) && /" gone"/.test(html));
+ok("amber is a fixed 30s, not a fraction of the hold", /left <= 30000/.test(html),
+   "a percentage would go amber a full minute early on a 180s bump");
+ok("reads as m:ss above a minute", /padStart\(2, "0"\)/.test(html),
+   "\"2:45\" is easier to call than \"165s\"");
+ok("shows OUT when the hold lapses", /"OUT"/.test(html));
+ok("names the bumper and the re-bump count", /b\.by \+/.test(html) && /b\.count > 1/.test(html));
+ok("timers survive a re-render", /paintBumps\(\);\s*\/\/ a re-render/.test(html),
+   "the scan list redraws on every new scan");
+ok("bump sent with the viewer token", /"Authorization": "Bearer " \+ token/.test(main));
+ok("timer comes from the feed, not the POST response",
+   /The timer itself arrives over the feed/.test(main),
+   "the bumper must see the same clock as everyone else");
+ok("cleared bumps hide the row", /onBumpCleared/.test(html) && /bumpCleared/.test(main));
+
+console.log("\n=== entry layout ===");
+// Once a gank is called the FC knows the system; what they need on the title
+// line is the name they are looking for on grid.
+ok("pilot on the title line, in parens", /class="pilot">\(/.test(html));
+ok("pilot omitted cleanly when unknown", /s\.pilot \?/.test(html),
+   "empty parens would be worse than nothing");
+ok("system moved to the meta line", /scanned in " \+ esc\(s\.system\)/.test(html));
+ok("system no longer on the title line", !/class="sys">' \+ esc\(s\.system/.test(html));
+ok("pilot truncates instead of shoving the controls off",
+   /\.pilot \{[^}]*text-overflow: ellipsis/.test(html),
+   "the window can be dragged to 280px and BUMP must stay reachable");
+
+console.log("\n=== bump failures are diagnosable ===");
+// "Not Found" told the user nothing and pointed at the wrong component.
+ok("a missing route is named as an out-of-date dashboard",
+   /doesn't support bumping yet/.test(main));
+ok("distinguished from a scan that aged out",
+   /!parsed\.detail &&/.test(main) && /not found\/i\.test/.test(main),
+   "both are 404s with completely different fixes");
+ok("the button shows it is working", /btn\.disabled = true/.test(html));
+ok("errors stay on screen long enough to read", /12000/.test(html));
+
 console.log("\n=== ipc surface is complete ===");
 const invokes = new Set([...pre.matchAll(/ipcRenderer\.invoke\("(\w+)"/g)].map(m => m[1]));
 const handled = new Set([...main.matchAll(/ipcMain\.handle\("(\w+)"/g)].map(m => m[1]));
