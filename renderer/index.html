@@ -103,6 +103,21 @@
   #detail .kv { font-size: 12px; margin: 2px 0; }
   #detail .kv b { color: var(--dim); font-weight: 600; display: inline-block; min-width: 66px; }
   .scan { cursor: pointer; }
+  /* bump timer - the whole point is being readable at a glance mid-fight */
+  .bumpbtn { margin-left:auto; font-size:10px; font-weight:800; letter-spacing:.4px;
+    padding:2px 7px; border-radius:4px; border:1px solid var(--line);
+    background:transparent; color:var(--dim); cursor:pointer; }
+  .bumpbtn:hover { color:#fff; border-color:var(--blue); background:var(--blue); }
+  .bumprow { display:flex; align-items:center; gap:7px; margin-top:5px;
+    font-size:11px; font-weight:700; }
+  .bumpbar { flex:1; height:4px; border-radius:2px; background:#2b2d31; overflow:hidden; }
+  .bumpbar i { display:block; height:100%; background:var(--green); transition:width .5s linear; }
+  .bumprow.warn .bumpbar i { background:var(--amber); }
+  .bumprow.gone .bumpbar i { background:var(--red); }
+  .bumpleft { font-variant-numeric:tabular-nums; color:var(--green); min-width:38px; }
+  .bumprow.warn .bumpleft { color:var(--amber); }
+  .bumprow.gone .bumpleft { color:var(--red); }
+  .bumpwho { color:var(--dim); font-weight:600; }
   .scan:hover { background: rgba(255,255,255,.045); }
 
   /* click-through hint - the window ignores clicks, so this has to say how to get out */
@@ -259,6 +274,12 @@
           '<span class="hull">' + esc(s.hull || "Unknown") + '</span>' +
           '<span class="sys">' + esc(s.system || "?") + '</span>' +
           '<span class="age">&mdash;</span>' +
+          '<button class="bumpbtn" data-bump="' + esc(s.id) + '" title="Start or refresh the bump timer">BUMP</button>' +
+        '</div>' +
+        '<div class="bumprow" data-bumprow="' + esc(s.id) + '" style="display:none">' +
+          '<span class="bumpleft">&mdash;</span>' +
+          '<span class="bumpbar"><i style="width:100%"></i></span>' +
+          '<span class="bumpwho"></span>' +
         '</div>' +
         '<div class="row2">' +
           (sell ? '<span class="val ' + tier(s.valueSell) + '">' + sell + '</span>' : "") +
@@ -273,8 +294,18 @@
       "</div>";
     }).join("");
     Array.prototype.forEach.call(list.querySelectorAll(".scan"), function (el) {
-      el.addEventListener("click", function () { openDetail(el.getAttribute("data-id")); });
+      el.addEventListener("click", function (e) {
+        if (e.target.hasAttribute("data-bump")) return;   // the button is not the row
+        openDetail(el.getAttribute("data-id"));
+      });
     });
+    Array.prototype.forEach.call(list.querySelectorAll("[data-bump]"), function (el) {
+      el.addEventListener("click", function (e) {
+        e.stopPropagation();
+        sendBump(el.getAttribute("data-bump"));
+      });
+    });
+    paintBumps();     // a re-render must restore any running timers
     tick();
   }
 
@@ -355,6 +386,54 @@
   });
   window.milf.onClear(function () { scans = []; $("detail").className = ""; render(); });
 
+
+  // Bumps arrive on the same stream as scans, keyed by scan id. Held apart
+  // from the scan list so a re-render doesn't lose a running timer.
+  var bumps = {};
+
+  function paintBumps() {
+    var now = Date.now();
+    Object.keys(bumps).forEach(function (id) {
+      var b = bumps[id];
+      var row = document.querySelector('[data-bumprow="' + id + '"]');
+      if (!row) return;
+      var elapsed = now - b.at;
+      var left = b.holdMs - elapsed;
+      row.style.display = "flex";
+      var pct = Math.max(0, Math.min(100, (left / b.holdMs) * 100));
+      row.querySelector("i").style.width = pct + "%";
+      // The number an FC reads out. Counts DOWN, because "how long have I got"
+      // is the question, not "how long has it been".
+      // m:ss above a minute - "165s" is harder to read out than "2:45".
+      var secs = Math.ceil(left / 1000);
+      row.querySelector(".bumpleft").textContent = left <= 0 ? "OUT"
+        : secs >= 60 ? Math.floor(secs / 60) + ":" + String(secs % 60).padStart(2, "0")
+        : secs + "s";
+      row.querySelector(".bumpwho").textContent =
+        b.by + (b.count > 1 ? "  \u00D7" + b.count : "");
+      // Amber at 30 seconds left, not a fraction of the hold. On a 180s bump a
+      // percentage would go amber with a full minute to spare, which reads as
+      // urgent far too early and stops meaning anything.
+      row.className = "bumprow" + (left <= 0 ? " gone" : left <= 30000 ? " warn" : "");
+    });
+  }
+  setInterval(paintBumps, 250);
+
+  function sendBump(id) {
+    window.milf.bump(id).then(function (r) {
+      if (r && r.ok === false) setStatus({ state: "error", detail: r.error || "bump failed" });
+    });
+  }
+
+  window.milf.onBump(function (b) {
+    bumps[b.scanId] = b;
+    paintBumps();
+  });
+  window.milf.onBumpCleared(function (d) {
+    delete bumps[d.scanId];
+    var row = document.querySelector('[data-bumprow="' + d.scanId + '"]');
+    if (row) row.style.display = "none";
+  });
 
   window.milf.onScan(function (s) {
     scans.unshift(s);

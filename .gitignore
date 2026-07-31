@@ -1,0 +1,14 @@
+# Rebuilt by `npm ci` from package-lock.json. Committing it adds hundreds of
+# megabytes - electron.exe alone is over 100MB, which is GitHub's hard limit.
+node_modules/
+
+# Build output. The exe belongs on a GitHub Release, not in the repo.
+dist/
+
+# Local viewer settings: server address and pairing token. The token grants
+# read access to the intel feed, so this must never be committed.
+settings.json
+
+*.log
+.DS_Store
+Thumbs.db
