@@ -1,0 +1,134 @@
+// Every field a compromised dashboard controls must reach the DOM escaped or
+// coerced. This walks the renderer looking for the pattern that bit us twice.
+const fs = require("fs");
+const app = fs.readFileSync("renderer/app.js", "utf8");
+const html = fs.readFileSync("renderer/index.html", "utf8");
+const main = fs.readFileSync("main.js", "utf8");
+
+let pass = 0, fail = 0;
+const ok = (n, c, d) => c ? (pass++, console.log("  PASS  " + n))
+                          : (fail++, console.log("  FAIL  " + n + (d ? "  -> " + d : "")));
+
+console.log("\n=== hostile scan rendered ===");
+// Pattern-matching the source for missed esc() calls kept flagging safe code.
+// Rendering a poisoned scan and inspecting the actual output is exact: either
+// executable markup comes out or it doesn't.
+const PAYLOAD = '"><img src=x onerror=ATTACK()><script>ATTACK()</script>';
+const hostile = {
+  id: PAYLOAD, at: '1" onmouseover="ATTACK()" x="', scout: PAYLOAD, hull: PAYLOAD,
+  system: PAYLOAD, pilot: PAYLOAD, scanGate: PAYLOAD, headGate: PAYLOAD,
+  ammo: PAYLOAD, sec: PAYLOAD, prepped: PAYLOAD, notes: PAYLOAD,
+  valueSell: PAYLOAD, valueBuy: PAYLOAD, valueSplit: PAYLOAD, droppableSplit: PAYLOAD,
+  ehp: PAYLOAD, fitEft: PAYLOAD,
+  fleetAll: [{ name: PAYLOAD, ships: PAYLOAD }],
+  cargoList: [{ name: PAYLOAD, qty: PAYLOAD }],
+};
+
+const captured = [];
+function el() {
+  return {
+    _s: new Set(), value: "", textContent: "", style: {}, disabled: false,
+    set innerHTML(v) { captured.push(String(v)); this._html = String(v); },
+    get innerHTML() { return this._html || ""; },
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    addEventListener() {}, querySelector: () => el(), querySelectorAll: () => [],
+    getAttribute: () => "", hasAttribute: () => false, setAttribute() {},
+  };
+}
+const nodes = {};
+global.document = {
+  getElementById: (id) => (nodes[id] = nodes[id] || el()),
+  querySelector: () => el(), querySelectorAll: () => [],
+  addEventListener() {}, body: el(), createElement: el,
+};
+global.window = { milf: {
+  onScan(fn) { this._scan = fn; }, onStatus() {}, onClear() {},
+  onRepair() {}, onBump() {}, onBumpCleared() {}, onUnpaired() {}, onClipWatch() {},
+  clipwatch: () => Promise.resolve({ on: false, stats: {} }),
+  state: () => Promise.resolve({ paired: true, serverUrl: "", opacity: 1 }),
+  bump: () => Promise.resolve({ ok: true }), pair: () => Promise.resolve({ ok: true }),
+  unpair: () => Promise.resolve(true), setOpacity() {}, quit() {},
+} };
+global.setInterval = () => 0; global.clearInterval = () => {};
+global.setTimeout = () => 0; global.clearTimeout = () => {};
+
+new Function(app)();
+window.milf._scan(hostile);            // deliver the poisoned scan
+const out = captured.join("\n");
+
+ok("something was actually rendered", out.length > 0, "test would pass vacuously otherwise");
+ok("no script tag survives", !/<script/i.test(out), out.slice(0, 160));
+// Matching the raw string is wrong: an escaped payload legitimately CONTAINS
+// the text " onerror=" while being completely inert. What matters is whether
+// a real tag or a real attribute was created, so parse the output instead.
+const TEMPLATE_TAGS = new Set(["div", "span", "button", "b", "i", "pre", "h3", "br"]);
+const tags = [...out.matchAll(/<\/?([a-zA-Z][\w-]*)([^>]*)>/g)];
+const foreign = [...new Set(tags.map(t => t[1].toLowerCase()))].filter(t => !TEMPLATE_TAGS.has(t));
+ok("only tags the template itself emits", foreign.length === 0, foreign.join(", "));
+
+// Attribute NAMES, not any text inside a tag. An escaped payload sitting in
+// data-id="&lt;img ... onerror=..." legitimately contains the characters
+// " onerror=" while being completely inert, and matching raw text flags it.
+// Quotes inside values are escaped to &quot;, so this parse is unambiguous.
+const attrNames = tags.flatMap(t =>
+  [...t[2].matchAll(/([a-zA-Z_:][\w:.-]*)\s*=\s*"/g)].map(a => a[1].toLowerCase()));
+const handlers = attrNames.filter(n => /^on/.test(n));
+ok("no event handler attribute on any real tag", handlers.length === 0, handlers.join(", "));
+ok("attribute names are only the ones the template writes",
+   attrNames.every(n => ["class", "style", "title", "data-at", "data-id",
+                         "data-bump", "data-bumprow", "data-row", "src"].includes(n)),
+   [...new Set(attrNames)].join(", "));
+
+ok("the payload survives as text, not markup",
+   out.includes("&lt;img") && !out.includes("<img"),
+   "escaped is fine - it should be readable and inert");
+ok("attribute boundaries intact",
+   !tags.some(t => /onmouseover/i.test(t[2])),
+   "s.at must not be able to close its own attribute");
+
+console.log("\n=== the two that were exploitable ===");
+ok("s.at is coerced, not interpolated raw",
+   /data-at="' \+ \(Number\(s\.at\) \|\| 0\)/.test(app),
+   "was: data-at=\"' + s.at + '\" - closed the attribute early");
+ok("f.ships is escaped in the detail popup",
+   /esc\(String\(f\.ships\)\.padStart/.test(app),
+   "was raw; a tag in it went straight into the DOM");
+
+console.log("\n=== an escaping slip should not be executable ===");
+ok("no inline script left in the page", !/<script>[\s\S]*\S[\s\S]*<\/script>/.test(html));
+ok("script loaded from a file", /<script src="app\.js">/.test(html));
+ok("CSP forbids inline script", /script-src 'self'/.test(html) &&
+   !/script-src[^;]*unsafe-inline/.test(html),
+   "this is what downgrades an escaping bug to a cosmetic glitch");
+ok("CSP blocks all outbound loads", /default-src 'none'/.test(html));
+ok("CSP blocks network from the renderer", /connect-src 'none'/.test(html));
+
+console.log("\n=== renderer containment ===");
+ok("context isolation on", /contextIsolation: true/.test(main));
+ok("node integration off", /nodeIntegration: false/.test(main));
+ok("OS sandbox set explicitly", /sandbox: true/.test(main),
+   "defaulted on, but explicit survives a future config edit");
+ok("new windows denied", /setWindowOpenHandler\(\(\) => \(\{ action: "deny" \}\)\)/.test(main));
+ok("navigation away refused", /will-navigate[\s\S]{0,60}preventDefault/.test(main));
+ok("webview tag disabled", /webviewTag: false/.test(main));
+
+console.log("\n=== the bridge is the only way out, and it is narrow ===");
+const exposed = [...main.matchAll(/ipcMain\.handle\("(\w+)"/g)].map(x => x[1]);
+console.log("    reachable from the renderer: " + exposed.join(", "));
+ok("no shell access exposed", !/shell\./.test(main));
+// Only the ipcMain.handle bodies are reachable from page script; save() and
+// the SSE client are main-process code the renderer cannot invoke.
+const handlerBodies = [...main.matchAll(/ipcMain\.handle\("(\w+)",[\s\S]*?\n\}\);/g)]
+  .map(x => x[0]).join("\n");
+ok("no process spawning reachable from the renderer",
+   !/child_process|spawn\(|execFile|exec\(/.test(handlerBodies));
+ok("no arbitrary filesystem write reachable from the renderer",
+   !/writeFileSync\(|unlink|rmSync/.test(handlerBodies),
+   "settings are written by save(), which takes no renderer-supplied path");
+const stateBody = (main.match(/ipcMain\.handle\("state"[\s\S]*?\n\}\);/) || [""])[0];
+ok("state() reports pairing as a boolean, never the token itself",
+   /paired: !!s\.token/.test(stateBody) && !/token: /.test(stateBody),
+   "page script must not be able to read the credential");
+
+console.log("\n" + (fail === 0 ? "ALL " + pass + " PASSED" : pass + " passed, " + fail + " FAILED"));
+process.exit(fail === 0 ? 0 : 1);
