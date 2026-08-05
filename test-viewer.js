@@ -106,12 +106,19 @@ console.log("\n=== bump timers survive clock skew ===");
 // clock from the server's. A viewer 40s fast opened a fresh 3:00 at 2:20.
 ok("no server timestamp in the countdown", !/now - b\.at/.test(html),
    "cross-machine subtraction is the whole fault");
-ok("anchored to local receipt time", /b\.receivedAt = Date\.now\(\)/.test(html) &&
+ok("anchored to a monotonic local clock",
+   /b\.receivedAt = performance\.now\(\)/.test(html) &&
+   /now = performance\.now\(\)/.test(html) &&
    /now - b\.receivedAt/.test(html));
 ok("counts down from server-supplied remaining", /b\.remainingMs - elapsed/.test(html));
-ok("bar scales to what was left on arrival", /left \/ span/.test(html),
-   "a replayed hold should show a part-full bar, not start over");
-ok("tolerates an older server", /typeof b\.remainingMs !== "number"/.test(html));
+ok("replayed hold has a part-full bar", /left \/ b\.totalMs/.test(html) &&
+   /Number\(b\.holdMs\)/.test(html),
+   "the full hold is the bar denominator, not the remaining duration");
+ok("validates server-reported remaining time",
+   /remainingMs = Number\(b\.remainingMs\)/.test(html) &&
+   /Number\.isFinite\(remainingMs\)/.test(html));
+ok("tolerates an older server without using its clock",
+   /remainingMs = Number\(b\.holdMs\)/.test(html));
 
 console.log("\n=== entry layout ===");
 // Once a gank is called the FC knows the system; what they need on the title
