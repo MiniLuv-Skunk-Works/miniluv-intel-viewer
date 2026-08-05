@@ -1,6 +1,30 @@
 export type ClipboardKind = "fit" | "cargo";
 export type OpacityLevel = 0 | 1 | 2;
 
+// The dashboard owns the wire protocol. Keep this range explicit so a viewer
+// release never silently claims compatibility with semantics it has not been
+// tested against.
+export const VIEWER_PROTOCOL_MIN_VERSION = 1;
+export const VIEWER_PROTOCOL_MAX_VERSION = 1;
+
+export const PROTOCOL_CAPABILITIES = {
+  scanFeed: "scan-feed",
+  bumpControl: "bump-control",
+  clipboardRelay: "clipboard-relay",
+  clipboardVocabulary: "clipboard-vocabulary",
+} as const;
+
+export type KnownCapability = typeof PROTOCOL_CAPABILITIES[keyof typeof PROTOCOL_CAPABILITIES];
+export const KNOWN_CAPABILITIES: readonly KnownCapability[] = Object.freeze(
+  Object.values(PROTOCOL_CAPABILITIES),
+);
+
+export type ProtocolCompatibility =
+  | "fully-compatible"
+  | "legacy"
+  | "limited-capability"
+  | "newer-protocol";
+
 export interface Settings {
   serverUrl?: string | null;
   token?: string | null;
@@ -25,6 +49,8 @@ export type ConnectionState =
 export interface ConnectionStatus {
   state: ConnectionState;
   detail?: string;
+  compatibility?: ProtocolCompatibility;
+  protocolVersion?: number;
 }
 
 export interface FleetEntry {
@@ -125,6 +151,15 @@ export interface ClaimResponse {
 
 export interface HelloEvent {
   name: string;
+  protocolVersion?: number;
+  capabilities?: KnownCapability[];
+}
+
+export interface ProtocolNegotiation {
+  compatibility: ProtocolCompatibility;
+  protocolVersion?: number;
+  capabilities: KnownCapability[];
+  missingCapabilities: KnownCapability[];
 }
 
 export interface IpcInvokeContract {
@@ -185,6 +220,10 @@ function finiteNumberLike(value: unknown): number | null {
 
 function string(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+function isKnownCapability(value: string): value is KnownCapability {
+  return (KNOWN_CAPABILITIES as readonly string[]).includes(value);
 }
 
 type ScanStringKey = "scout" | "hull" | "system" | "pilot" | "scanGate" | "headGate" |
@@ -322,7 +361,52 @@ export function parseBumpClearedEvent(value: unknown): BumpClearedEvent | null {
 export function parseHelloEvent(value: unknown): HelloEvent | null {
   const source = record(value);
   const name = source ? string(source.name) : null;
-  return name === null ? null : { name };
+  if (name === null) return null;
+
+  const result: HelloEvent = { name };
+  if (source?.protocolVersion !== undefined) {
+    const version = finiteNumber(source.protocolVersion);
+    if (version === null || !Number.isInteger(version) || version < 1) return null;
+    result.protocolVersion = version;
+  }
+  if (source?.capabilities !== undefined) {
+    if (!Array.isArray(source.capabilities) ||
+        !source.capabilities.every((capability) => typeof capability === "string")) return null;
+    result.capabilities = [...new Set(source.capabilities.filter(isKnownCapability))];
+  }
+  return result;
+}
+
+export function negotiateProtocol(hello: HelloEvent): ProtocolNegotiation {
+  // Either missing field identifies a pre-negotiation dashboard. Preserve the
+  // released viewer's behavior instead of interpreting an incomplete additive
+  // rollout as a denial of every optional feature.
+  if (hello.protocolVersion === undefined || hello.capabilities === undefined) {
+    return {
+      compatibility: "legacy",
+      capabilities: [...KNOWN_CAPABILITIES],
+      missingCapabilities: [],
+    };
+  }
+
+  const advertised = new Set(hello.capabilities);
+  const capabilities = KNOWN_CAPABILITIES.filter((capability) => advertised.has(capability));
+  const missingCapabilities = KNOWN_CAPABILITIES.filter((capability) => !advertised.has(capability));
+  if (hello.protocolVersion > VIEWER_PROTOCOL_MAX_VERSION) {
+    return {
+      compatibility: "newer-protocol",
+      protocolVersion: hello.protocolVersion,
+      capabilities,
+      missingCapabilities,
+    };
+  }
+
+  return {
+    compatibility: missingCapabilities.length === 0 ? "fully-compatible" : "limited-capability",
+    protocolVersion: hello.protocolVersion,
+    capabilities,
+    missingCapabilities,
+  };
 }
 
 export function parseVocabulary(value: unknown): Vocabulary | null {
@@ -360,9 +444,21 @@ export function parseConnectionStatus(value: unknown): ConnectionStatus | null {
   const states: readonly ConnectionState[] = ["live", "connecting", "reconnecting", "offline", "error", "unpaired", "clip", "warn"];
   if (!states.includes(source.state as ConnectionState)) return null;
   if (source.detail !== undefined && typeof source.detail !== "string") return null;
-  return source.detail === undefined
-    ? { state: source.state as ConnectionState }
-    : { state: source.state as ConnectionState, detail: source.detail };
+  const result: ConnectionStatus = { state: source.state as ConnectionState };
+  if (source.detail !== undefined) result.detail = source.detail;
+  if (source.compatibility !== undefined) {
+    const compatibilities: readonly ProtocolCompatibility[] = [
+      "fully-compatible", "legacy", "limited-capability", "newer-protocol",
+    ];
+    if (!compatibilities.includes(source.compatibility as ProtocolCompatibility)) return null;
+    result.compatibility = source.compatibility as ProtocolCompatibility;
+  }
+  if (source.protocolVersion !== undefined) {
+    const protocolVersion = finiteNumber(source.protocolVersion);
+    if (protocolVersion === null || !Number.isInteger(protocolVersion) || protocolVersion < 1) return null;
+    result.protocolVersion = protocolVersion;
+  }
+  return result;
 }
 
 export function parseClipboardStats(value: unknown): ClipboardStats | null {

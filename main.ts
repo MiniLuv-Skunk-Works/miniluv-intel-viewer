@@ -23,6 +23,7 @@ import {
   parseClaimResponse,
   parseClipWatchRequest,
   parseHelloEvent,
+  negotiateProtocol,
   parseOpacity,
   parsePairRequest,
   parseScan,
@@ -39,9 +40,12 @@ import {
   type IpcEventContract,
   type IpcInvokeContract,
   type PairResult,
+  type KnownCapability,
+  type ProtocolNegotiation,
   type Settings,
   type ViewerState,
   type Vocabulary,
+  PROTOCOL_CAPABILITIES,
 } from "./contracts";
 
 const STORE = path.join(app.getPath("userData"), "settings.json");
@@ -51,6 +55,56 @@ let tray: Tray | null = null;
 let stream: http.ClientRequest | null = null;
 let retryMs = 1000;
 let quitting = false;
+let protocol: ProtocolNegotiation | null = null;
+
+function supports(capability: KnownCapability): boolean {
+  // Until a complete modern hello arrives, act like the released viewer so
+  // legacy dashboards and partially rolled-out additive hellos keep working.
+  if (!protocol || protocol.compatibility === "legacy") return true;
+  // A newer protocol may have changed capability semantics. Its read-only
+  // scan feed remains useful, but writes and clipboard relays fail closed.
+  if (protocol.compatibility === "newer-protocol") return false;
+  return protocol.capabilities.includes(capability);
+}
+
+function protocolStatus(name: string, negotiated: ProtocolNegotiation): ConnectionStatus {
+  if (negotiated.compatibility === "fully-compatible") {
+    return {
+      state: "live",
+      detail: name,
+      compatibility: negotiated.compatibility,
+      ...(negotiated.protocolVersion === undefined ? {} : { protocolVersion: negotiated.protocolVersion }),
+    };
+  }
+  if (negotiated.compatibility === "legacy") {
+    return {
+      state: "warn",
+      detail: "Legacy dashboard - compatibility mode",
+      compatibility: negotiated.compatibility,
+    };
+  }
+  if (negotiated.compatibility === "newer-protocol") {
+    return {
+      state: "warn",
+      detail: `Dashboard protocol v${negotiated.protocolVersion} is newer - scan feed only`,
+      compatibility: negotiated.compatibility,
+      ...(negotiated.protocolVersion === undefined ? {} : { protocolVersion: negotiated.protocolVersion }),
+    };
+  }
+
+  const labels: Record<KnownCapability, string> = {
+    "scan-feed": "scan feed",
+    "bump-control": "bumping",
+    "clipboard-relay": "clipboard relay",
+    "clipboard-vocabulary": "clipboard vocabulary",
+  };
+  return {
+    state: "warn",
+    detail: "Limited dashboard - " + negotiated.missingCapabilities.map((capability) => labels[capability]).join(", ") + " unavailable",
+    compatibility: negotiated.compatibility,
+    ...(negotiated.protocolVersion === undefined ? {} : { protocolVersion: negotiated.protocolVersion }),
+  };
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -188,6 +242,7 @@ function loadVocabulary(): number | null {
 }
 
 function fetchVocabulary(): void {
+  if (!supports(PROTOCOL_CAPABILITIES.clipboardVocabulary)) return;
   const { serverUrl, token } = load();
   if (!serverUrl || !token) return;
   let target;
@@ -258,6 +313,10 @@ function pollClipboard(): void {
 }
 
 function sendClip(clip: ClipboardCapture): void {
+  if (!supports(PROTOCOL_CAPABILITIES.clipboardRelay)) {
+    relay("clipwatch", { on: clipboardWatching(), stats: clipStats, error: "dashboard does not advertise clipboard relay" });
+    return;
+  }
   const { serverUrl, token } = load();
   if (!serverUrl || !token) return;
   let target;
@@ -389,7 +448,25 @@ function handleEvent(raw: string): void {
     if (cleared) relay("bumpCleared", cleared);
   } else if (event === "hello") {
     const hello = parseHelloEvent(parsed);
-    if (hello) relay("status", { state: "live", detail: hello.name });
+    if (hello) {
+      protocol = negotiateProtocol(hello);
+      const clipboardSupported = supports(PROTOCOL_CAPABILITIES.clipboardRelay) &&
+        supports(PROTOCOL_CAPABILITIES.clipboardVocabulary);
+      if (clipboardSupported) {
+        if (clipboardWatching()) startClipWatch();
+      } else {
+        stopClipWatch();
+        relay("clipwatch", {
+          on: false,
+          stats: clipStats,
+          error: "dashboard does not advertise clipboard support",
+        });
+      }
+      // Send this last so the persistent compatibility warning remains the
+      // visible status if disabling an armed clipboard watcher also emitted an
+      // explanatory clipboard event.
+      relay("status", protocolStatus(hello.name, protocol));
+    }
   }
 }
 
@@ -442,6 +519,7 @@ handleIpc("pair", async (_event, input): Promise<PairResult> => {
       const failure = parseServerError(parsed);
       if (res.statusCode === 200 && claim) {
           save({ serverUrl: serverUrl, token: claim.token });
+          protocol = null;
           vocabulary = null;
           fetchVocabulary();
           retryMs = 1000;
@@ -463,6 +541,7 @@ handleIpc("pair", async (_event, input): Promise<PairResult> => {
 // Otherwise a stale token plus an unreachable server leaves no way back in.
 handleIpc("unpair", () => {
   stop();
+  protocol = null;
   save({ token: null });
   relay("unpaired", undefined);
   relay("status", { state: "unpaired" });
@@ -492,6 +571,9 @@ handleIpc("bump", async (_event, input): Promise<BumpResult> => {
   if (scanId === null) return { ok: false, error: "invalid scan" };
   const { serverUrl, token } = load();
   if (!serverUrl || !token) return { ok: false, error: "not paired" };
+  if (!supports(PROTOCOL_CAPABILITIES.bumpControl)) {
+    return { ok: false, error: "This dashboard does not advertise bump control." };
+  }
   let target;
   try { target = new URL("/api/viewer/bump", serverUrl); }
   catch { return { ok: false, error: "bad server address" }; }
@@ -546,6 +628,14 @@ handleIpc("clipwatch", (_event, input): ClipboardResult => {
   if (on === undefined) {
     return { on: clipboardWatching(), stats: clipStats,
              vocabulary: vocabulary ? vocabulary.size : 0 };
+  }
+  if (on && (!supports(PROTOCOL_CAPABILITIES.clipboardRelay) ||
+             !supports(PROTOCOL_CAPABILITIES.clipboardVocabulary))) {
+    return {
+      on: clipboardWatching(),
+      stats: clipStats,
+      error: "dashboard does not advertise clipboard support",
+    };
   }
   if (on && !vocabulary) fetchVocabulary();
   setClipboardWatching(on);

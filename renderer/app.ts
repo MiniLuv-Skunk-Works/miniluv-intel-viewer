@@ -192,7 +192,16 @@ declare global {
   }
   setInterval(tick, 1000);
 
+  var protocolNotice: ConnectionStatus | null = null;
   function setStatus(s: ConnectionStatus): void {
+    if (s.compatibility) {
+      protocolNotice = s.state === "warn" ? s : null;
+    } else if (s.state === "live" && protocolNotice) {
+      // Clipboard confirmations and recovered bump errors return to the
+      // persistent compatibility warning instead of hiding it forever.
+      s = protocolNotice;
+    }
+    if (s.state === "unpaired") protocolNotice = null;
     var dot = $("dot"), bar = $("status");
     var map: Record<ConnectionState, string> = { live: "live", connecting: "warn", reconnecting: "warn", offline: "bad",
               error: "bad", unpaired: "", clip: "live", warn: "warn" };

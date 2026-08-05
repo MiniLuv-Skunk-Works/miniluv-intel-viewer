@@ -1,0 +1,50 @@
+{
+  "protocolVersion": 1,
+  "events": {
+    "hello": {
+      "name": "MiniLuv Intel Dashboard",
+      "protocolVersion": 1,
+      "capabilities": [
+        "scan-feed",
+        "bump-control",
+        "clipboard-relay",
+        "clipboard-vocabulary"
+      ]
+    },
+    "scan": {
+      "id": "fixture-scan-1",
+      "at": 1700000000000,
+      "scout": "Fixture Scout",
+      "hull": "Obelisk",
+      "system": "Uedama",
+      "valueSell": 3000000000,
+      "fleetAll": [{ "name": "Talos", "ships": 12 }],
+      "cargoList": [{ "name": "Tritanium", "qty": 1000 }]
+    },
+    "bump": {
+      "scanId": "fixture-scan-1",
+      "by": "Fixture Bumper",
+      "count": 1,
+      "holdMs": 180000,
+      "remainingMs": 175000
+    },
+    "bumpCleared": { "scanId": "fixture-scan-1" }
+  },
+  "api": {
+    "pairingClaim": {
+      "request": { "code": "000000" },
+      "response": { "token": "fixture-token-not-a-credential" }
+    },
+    "bump": {
+      "request": { "scanId": "fixture-scan-1" },
+      "response": { "ok": true }
+    },
+    "clipboardRelay": {
+      "request": { "kind": "cargo", "text": "Tritanium 1000" },
+      "response": { "delivered": 1 }
+    },
+    "vocabulary": {
+      "response": { "words": ["tritanium", "obelisk"], "buildNumber": 1 }
+    }
+  }
+}

@@ -112,6 +112,21 @@ ok("re-fetched on a new pairing", /vocabulary = null;[\s\S]{0,40}fetchVocabulary
    "a different dashboard may run a different SDE build");
 ok("says when no dashboard tab is open", /no dashboard tab open/.test(html),
    "otherwise a successful capture looks like nothing happened");
+ok("stops an armed watcher when the dashboard lacks clipboard capabilities",
+   /if \(clipboardSupported\)[\s\S]{0,160}else \{\s*stopClipWatch\(\)/.test(main));
+
+console.log("\n=== protocol negotiation ===");
+ok("hello is negotiated before compatibility status is relayed",
+   /protocol = negotiateProtocol\(hello\)/.test(main) && /protocolStatus\(hello\.name, protocol\)/.test(main));
+ok("bump writes require the advertised capability",
+   /supports\(PROTOCOL_CAPABILITIES\.bumpControl\)/.test(main));
+ok("clipboard requests require both advertised capabilities",
+   /supports\(PROTOCOL_CAPABILITIES\.clipboardRelay\)/.test(main) &&
+   /supports\(PROTOCOL_CAPABILITIES\.clipboardVocabulary\)/.test(main));
+ok("future dashboards retain scan feed with a compact warning",
+   /newer - scan feed only/.test(main));
+ok("compatibility warnings survive transient messages",
+   /protocolNotice/.test(html) && /s = protocolNotice/.test(html));
 
 console.log("\n=== bump timers survive clock skew ===");
 // The bug: left = holdMs - (Date.now() - serverAt) subtracts the viewer's
