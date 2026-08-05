@@ -4,15 +4,24 @@
   "version": "0.1.0",
   "private": true,
   "description": "MiniLuv Intel Live Feed - always-on-top scan viewer",
-  "main": "main.js",
+  "main": ".build/main.js",
   "scripts": {
+    "build:code": "node scripts/build-code.mjs",
+    "build:tests": "node scripts/build-code.mjs --tests",
+    "typecheck": "tsc --noEmit",
+    "prestart": "npm run build:code",
     "start": "electron .",
-    "test": "node test-viewer.js && node test-security.js && node test-clipboard.js",
+    "pretest": "npm run build:code && npm run build:tests",
+    "test": "node .build/tests/test-viewer.js && node .build/tests/test-security.js && node .build/tests/test-clipboard.js && node .build/tests/test-contracts.js",
+    "prebuild": "npm run build:code",
     "build": "electron-builder --win --publish never"
   },
   "devDependencies": {
+    "@types/node": "^22.20.1",
     "electron": "^32.2.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.9.3"
   },
   "build": {
     "appId": "space.miniluv.milfviewer",
@@ -23,10 +32,11 @@
       "buildResources": "build"
     },
     "files": [
-      "main.js",
-      "preload.js",
-      "clipboard-filter.js",
-      "renderer/**/*"
+      ".build/**/*",
+      "!.build/tests/**/*",
+      "renderer/index.html",
+      "renderer/icon.png",
+      "renderer/icon-256.png"
     ],
     "win": {
       "icon": "build/icon.ico",

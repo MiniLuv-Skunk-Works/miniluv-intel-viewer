@@ -1,25 +1,37 @@
 // Electron can't run headless here, so these are structural checks on the
 // things that would strand a user: no way out of click-through, a dead
 // channel, a missing icon.
-const fs = require("fs");
-const path = require("path");
+import * as fs from "node:fs";
+import * as path from "node:path";
 
-const main = fs.readFileSync(path.join(__dirname, "main.js"), "utf8");
-const pre = fs.readFileSync(path.join(__dirname, "preload.js"), "utf8");
+const ROOT = path.resolve(__dirname, "..", "..");
+const main = fs.readFileSync(path.join(ROOT, "main.ts"), "utf8");
+const pre = fs.readFileSync(path.join(ROOT, "preload.ts"), "utf8");
 // The renderer script now lives in app.js, extracted so the CSP can forbid
 // inline script. Checks that look for behaviour need both files.
-const markup = fs.readFileSync(path.join(__dirname, "renderer", "index.html"), "utf8");
-const rendererJs = fs.readFileSync(path.join(__dirname, "renderer", "app.js"), "utf8");
+const markup = fs.readFileSync(path.join(ROOT, "renderer", "index.html"), "utf8");
+const rendererJs = fs.readFileSync(path.join(ROOT, "renderer", "app.ts"), "utf8");
 const html = markup + "\n" + rendererJs;
-const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
+interface PackageConfig {
+  main: string;
+  scripts: Record<string, string>;
+  build: {
+    files: string[];
+    directories: { buildResources: string };
+    win: { icon: string; target: Array<{ target: string }> };
+  };
+}
+const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")) as PackageConfig;
 
 let pass = 0, fail = 0;
-const ok = (n, c, d) => c ? (pass++, console.log("  PASS  " + n))
-                          : (fail++, console.log("  FAIL  " + n + (d ? "  -> " + d : "")));
+const ok = (name: string, condition: unknown, detail?: unknown): void => {
+  if (condition) { pass += 1; console.log("  PASS  " + name); }
+  else { fail += 1; console.log("  FAIL  " + name + (detail ? "  -> " + String(detail) : "")); }
+};
 
 console.log("\n=== click-through is gone ===");
 [main, pre, html].forEach(function (f, i) {
-  ok(["main.js", "preload.js", "renderer"][i] + " has no trace of it",
+  ok((["main.ts", "preload.ts", "renderer"][i] ?? "source") + " has no trace of it",
      !/clickThrough|setIgnoreMouseEvents|globalShortcut|TOGGLE_HOTKEY/i.test(f));
 });
 
@@ -33,8 +45,8 @@ ok("levels are visibly different", (function () {
   const a = [...html.matchAll(/body\.op\d \{ --bg: rgba\(16,17,19,\.(\d+)\)/g)].map(x => Number(x[1]));
   return a.length === 3 && Math.max(...a) - Math.min(...a) >= 30;
 })(), "0.78/0.80/0.62 was imperceptible");
-ok("cycles on click", /applyOpacity\(\(opLevel \+ 1\) % 3\)/.test(html));
-ok("preference is persisted", /ipcMain\.handle\("opacity"/.test(main) && /save\(\{ opacity/.test(main));
+ok("cycles on click", /applyOpacity\(\(\(opLevel \+ 1\) % 3\) as OpacityLevel\)/.test(html));
+ok("preference is persisted", /handleIpc\("opacity"/.test(main) && /save\(\{ opacity/.test(main));
 ok("restored on launch", /applyOpacity\(st\.opacity/.test(html));
 ok("background only, not the whole window",
    !/win\.setOpacity\(/.test(main.replace(/\/\/.*/g, "")),
@@ -42,9 +54,9 @@ ok("background only, not the whole window",
 ok("detail panel follows the same alpha", /#detail \{[^}]*background: var\(--bg\)/.test(html));
 
 console.log("\n=== tray actually works ===");
-ok("icon file exists", fs.existsSync(path.join(__dirname, "renderer", "icon.png")),
+ok("icon file exists", fs.existsSync(path.join(ROOT, "renderer", "icon.png")),
    "makeTray fails silently without it, removing one escape route");
-ok("ico exists for the exe", fs.existsSync(path.join(__dirname, "build", "icon.ico")));
+ok("ico exists for the exe", fs.existsSync(path.join(ROOT, "build", "icon.ico")));
 ok("tray failure is logged, not swallowed", /tray icon missing:/.test(main));
 
 console.log("\n=== detail popup ===");
@@ -100,6 +112,21 @@ ok("re-fetched on a new pairing", /vocabulary = null;[\s\S]{0,40}fetchVocabulary
    "a different dashboard may run a different SDE build");
 ok("says when no dashboard tab is open", /no dashboard tab open/.test(html),
    "otherwise a successful capture looks like nothing happened");
+ok("stops an armed watcher when the dashboard lacks clipboard capabilities",
+   /if \(clipboardSupported\)[\s\S]{0,160}else \{\s*stopClipWatch\(\)/.test(main));
+
+console.log("\n=== protocol negotiation ===");
+ok("hello is negotiated before compatibility status is relayed",
+   /protocol = negotiateProtocol\(hello\)/.test(main) && /protocolStatus\(hello\.name, protocol\)/.test(main));
+ok("bump writes require the advertised capability",
+   /supports\(PROTOCOL_CAPABILITIES\.bumpControl\)/.test(main));
+ok("clipboard requests require both advertised capabilities",
+   /supports\(PROTOCOL_CAPABILITIES\.clipboardRelay\)/.test(main) &&
+   /supports\(PROTOCOL_CAPABILITIES\.clipboardVocabulary\)/.test(main));
+ok("future dashboards retain scan feed with a compact warning",
+   /newer - scan feed only/.test(main));
+ok("compatibility warnings survive transient messages",
+   /protocolNotice/.test(html) && /s = protocolNotice/.test(html));
 
 console.log("\n=== bump timers survive clock skew ===");
 // The bug: left = holdMs - (Date.now() - serverAt) subtracts the viewer's
@@ -107,7 +134,7 @@ console.log("\n=== bump timers survive clock skew ===");
 ok("no server timestamp in the countdown", !/now - b\.at/.test(html),
    "cross-machine subtraction is the whole fault");
 ok("anchored to a monotonic local clock",
-   /b\.receivedAt = performance\.now\(\)/.test(html) &&
+   /receivedAt: performance\.now\(\)/.test(html) &&
    /now = performance\.now\(\)/.test(html) &&
    /now - b\.receivedAt/.test(html));
 ok("counts down from server-supplied remaining", /b\.remainingMs - elapsed/.test(html));
@@ -137,16 +164,16 @@ console.log("\n=== bump failures are diagnosable ===");
 ok("a missing route is named as an out-of-date dashboard",
    /doesn't support bumping yet/.test(main));
 ok("distinguished from a scan that aged out",
-   /!parsed\.detail &&/.test(main) && /not found\/i\.test/.test(main),
+   /!failure\.detail &&/.test(main) && /not found\/i\.test/.test(main),
    "both are 404s with completely different fixes");
 ok("the button shows it is working", /btn\.disabled = true/.test(html));
 ok("errors stay on screen long enough to read", /12000/.test(html));
 
 console.log("\n=== ipc surface is complete ===");
-const invokes = new Set([...pre.matchAll(/ipcRenderer\.invoke\("(\w+)"/g)].map(m => m[1]));
-const handled = new Set([...main.matchAll(/ipcMain\.handle\("(\w+)"/g)].map(m => m[1]));
+const invokes = new Set([...pre.matchAll(/invokeUnknown\("(\w+)"/g)].map(m => m[1]));
+const handled = new Set([...main.matchAll(/handleIpc\("(\w+)"/g)].map(m => m[1]));
 const relayed = new Set([...main.matchAll(/relay\("(\w+)"/g)].map(m => m[1]));
-const listened = new Set([...pre.matchAll(/ipcRenderer\.on\("(\w+)"/g)].map(m => m[1]));
+const listened = new Set([...pre.matchAll(/onIpc\("(\w+)"/g)].map(m => m[1]));
 ok("every invoke has a handler", [...invokes].every(i => handled.has(i)),
    [...invokes].filter(i => !handled.has(i)).join(","));
 ok("every relay has a listener", [...relayed].every(r => listened.has(r)),
@@ -155,11 +182,11 @@ ok("every relay has a listener", [...relayed].every(r => listened.has(r)),
 console.log("\n=== icons ===");
 const fsx = require("fs");
 ok("build/icon.ico exists where electron-builder looks",
-   fsx.existsSync(path.join(__dirname, "build", "icon.ico")),
+   fsx.existsSync(path.join(ROOT, "build", "icon.ico")),
    "it silently falls back to the Electron default rather than erroring");
 ok("ico contains a 256px frame", (function () {
   // electron-builder rejects ICOs without one, and Windows needs it for large views.
-  const buf = fsx.readFileSync(path.join(__dirname, "build", "icon.ico"));
+  const buf = fsx.readFileSync(path.join(ROOT, "build", "icon.ico"));
   const count = buf.readUInt16LE(4);
   for (let i = 0; i < count; i++) {
     const w = buf[6 + i * 16];
@@ -170,30 +197,25 @@ ok("ico contains a 256px frame", (function () {
 ok("build config points at it", pkg.build.win.icon === "build/icon.ico", pkg.build.win.icon);
 ok("buildResources declared", pkg.build.directories.buildResources === "build");
 ok("window icon set separately from the exe icon",
-   /icon: path\.join\(__dirname, "renderer", "icon-256\.png"\)/.test(main),
+   /icon: path\.join\(__dirname, "\.\.", "renderer", "icon-256\.png"\)/.test(main),
    "win.icon in the build config does nothing for the running window");
 ok("window icon is inside build.files",
    pkg.build.files.some(f => f.startsWith("renderer")),
    "build/ is buildResources - not present in the packaged app");
 
 console.log("\n=== packaging ===");
-// Every local require() must be inside build.files. Missing one works
-// perfectly in `npm start` and throws MODULE_NOT_FOUND only in the built exe,
-// which is the worst place to find out.
-const localRequires = [...(main + pre).matchAll(/require\("\.\/([^"]+)"\)/g)]
-  .map((m) => (m[1].endsWith(".js") ? m[1] : m[1] + ".js"));
-const packaged = pkg.build.files;
-const covered = (file) => packaged.some((pattern) =>
-  pattern === file || (pattern.endsWith("/**/*") && file.startsWith(pattern.slice(0, -5))));
-const missing = [...new Set(localRequires)].filter((f) => !covered(f));
-ok("every required file is packaged", missing.length === 0, missing.join(", "));
-console.log("    requires: " + [...new Set(localRequires)].join(", "));
+ok("compiled Electron entry is configured", pkg.main === ".build/main.js", pkg.main);
+ok("compiled production is packaged", pkg.build.files.includes(".build/**/*"));
+ok("compiled tests are excluded", pkg.build.files.includes("!.build/tests/**/*"));
+ok("TypeScript source is not packaged", !pkg.build.files.some((pattern) => pattern.endsWith(".ts")));
 
 ok("single portable exe, no installer",
-   pkg.build.win.target[0].target === "portable", JSON.stringify(pkg.build.win.target));
+   pkg.build.win.target[0]?.target === "portable", JSON.stringify(pkg.build.win.target));
 ok("icon wired into the build", pkg.build.win.icon === "build/icon.ico");
-ok("build script present", !!pkg.scripts.build);
-ok("renderer assets included", pkg.build.files.includes("renderer/**/*"));
+ok("code, test, and typecheck scripts present",
+   !!pkg.scripts.build && !!pkg.scripts["build:code"] && !!pkg.scripts["build:tests"] && !!pkg.scripts.typecheck);
+ok("renderer assets included",
+   pkg.build.files.includes("renderer/index.html") && pkg.build.files.includes("renderer/icon.png"));
 
 console.log("\n=== security posture unchanged ===");
 ok("contextIsolation on", /contextIsolation: true/.test(main));

@@ -2,9 +2,9 @@
 // The classifier decides what leaves the machine. Its failure modes are not
 // symmetric: missing a ship scan is an inconvenience, forwarding a password is
 // a breach. The rejection cases matter more than the acceptance ones.
-const fs = require("fs");
-const path = require("path");
-const { classify: classifyRaw, isSlotHeader } = require("./clipboard-filter");
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { classify as classifyRaw, isSlotHeader } from "../clipboard-filter";
 
 // A slice of EVE's real vocabulary. The live one comes from the SDE.
 const VOCAB = new Set(("tritanium pyerite mexallon isogen nocxium zydrine megacyte " +
@@ -15,11 +15,13 @@ const VOCAB = new Set(("tritanium pyerite mexallon isogen nocxium zydrine megacy
   "obelisk charon providence fenrir high power low rig slot subsystem empty adaptive " +
   "invulnerability multispectrum energized membrane coating hardener amplifier item")
   .split(/\s+/));
-const classify = (text) => classifyRaw(text, VOCAB);
+const classify = (text: unknown) => classifyRaw(text, VOCAB);
 
 let pass = 0, fail = 0;
-const ok = (n, c, d) => c ? (pass++, console.log("  PASS  " + n))
-                          : (fail++, console.log("  FAIL  " + n + (d ? "  -> " + d : "")));
+const ok = (name: string, condition: unknown, detail?: unknown): void => {
+  if (condition) { pass += 1; console.log("  PASS  " + name); }
+  else { fail += 1; console.log("  FAIL  " + name + (detail ? "  -> " + String(detail) : "")); }
+};
 
 console.log("\n=== must NEVER be transmitted ===");
 const forbidden = {
@@ -76,7 +78,7 @@ console.log("\n=== the slot-header rule matches the dashboard's ===");
 const corePath = process.env.DASHBOARD_CORE_PARSER ||
   path.join(__dirname, "..", "d5", "miniluv-intel-dashboard-main",
             "packages", "core", "src", "parsing", "index.ts");
-const cases = [
+const cases: Array<[string, boolean]> = [
   ["High Power", true], ["Medium Power", true], ["Med Power", true], ["Low Power", true],
   ["High Power Slot", true], ["Low Power Slots", true],
   ["Rig Slot", true], ["Rigs", true], ["Rig", true],

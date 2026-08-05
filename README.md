@@ -60,15 +60,50 @@ npm ci
 npm start
 ```
 
-Run the portable test suite:
+Type-check the application and tests, then run the portable test suite:
 
 ```powershell
+npm run typecheck
 npm test
 ```
+
+Development, tests, and packaging compile TypeScript into the ignored
+`.build\` directory automatically. Generated JavaScript is disposable and
+must not be committed.
 
 The clipboard tests can additionally compare their slot-header rule with a
 dashboard checkout when `DASHBOARD_CORE_PARSER` points to the dashboard's
 `packages/core/src/parsing/index.ts` file.
+
+### Dashboard protocol compatibility
+
+This viewer supports dashboard protocol version 1. A version-1 dashboard with
+all four known capabilities (`scan-feed`, `bump-control`, `clipboard-relay`,
+and `clipboard-vocabulary`) is fully compatible. Unknown capability names are
+ignored so dashboards can add optional features independently.
+
+Compatibility is deliberately friendly to independent releases:
+
+- A dashboard hello without `protocolVersion` or `capabilities` is treated as
+  legacy. Existing feed, bump, and clipboard behavior remains available.
+- A version-1 dashboard that omits a known capability remains connected, while
+  the corresponding optional viewer operation is unavailable.
+- A dashboard with a newer protocol version still supplies the basic scan
+  feed. The viewer shows a compact warning and disables writes and clipboard
+  relay until that protocol version is supported.
+- Adding fields does not require a protocol version increase. Semantic changes
+  do, and new optional behavior should be advertised as a capability.
+
+The viewer has no runtime dependency on dashboard source or packages. It keeps
+a self-contained representative fixture at
+`tests/fixtures/viewer-protocol-v1.json`. To exercise a dashboard checkout's
+portable fixture through the viewer parsers, run:
+
+```powershell
+$env:DASHBOARD_VIEWER_PROTOCOL_FIXTURE = "D:\path\to\dashboard\packages\contracts\fixtures\viewer-protocol-v1.json"
+npm test
+Remove-Item Env:DASHBOARD_VIEWER_PROTOCOL_FIXTURE
+```
 
 Build the portable executable:
 
@@ -96,11 +131,13 @@ manual recovery steps.
 
 | Path | Purpose |
 | --- | --- |
-| `main.js` | Electron main process, pairing, feed connection, tray, and clipboard polling |
-| `preload.js` | Narrow IPC bridge exposed to the sandboxed renderer |
-| `renderer/` | Viewer interface and live countdown behavior |
-| `clipboard-filter.js` | Local, fail-closed fit and cargo classifier |
-| `test-*.js` | Portable behavior, security, and clipboard checks |
+| `main.ts` | Electron main process, pairing, feed connection, tray, and clipboard polling |
+| `preload.ts` | Narrow, typed IPC bridge exposed to the sandboxed renderer |
+| `contracts.ts` | Shared IPC/domain types and runtime boundary parsers |
+| `renderer/` | TypeScript viewer interface, static HTML, icons, and live countdown behavior |
+| `clipboard-filter.ts` | Local, fail-closed fit and cargo classifier |
+| `tests/*.ts` | Portable behavior, security, clipboard, and contract checks |
+| `scripts/build-code.mjs` | Disposable esbuild production/test compilation |
 | `.github/workflows/` | PR, continuous, and stable release automation |
 
 ## Security model
