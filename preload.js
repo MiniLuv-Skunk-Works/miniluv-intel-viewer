@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("milf", {
   // fade the text too, which is the opposite of useful in an overlay.
   setOpacity: (level) => ipcRenderer.invoke("opacity", level),
   bump: (scanId) => ipcRenderer.invoke("bump", scanId),
+  clipwatch: (on) => ipcRenderer.invoke("clipwatch", on),
   quit: () => ipcRenderer.invoke("close"),
   onScan: (fn) => ipcRenderer.on("scan", (_e, d) => fn(d)),
   onStatus: (fn) => ipcRenderer.on("status", (_e, d) => fn(d)),
@@ -19,5 +20,6 @@ contextBridge.exposeInMainWorld("milf", {
   onRepair: (fn) => ipcRenderer.on("repair", () => fn()),
   onBump: (fn) => ipcRenderer.on("bump", (_e, d) => fn(d)),
   onBumpCleared: (fn) => ipcRenderer.on("bumpCleared", (_e, d) => fn(d)),
+  onClipWatch: (fn) => ipcRenderer.on("clipwatch", (_e, d) => fn(d)),
   onUnpaired: (fn) => ipcRenderer.on("unpaired", () => fn())
 });

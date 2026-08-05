@@ -9,12 +9,13 @@
 // Works with windowed and borderless-fullscreen EVE. Exclusive fullscreen will
 // cover it, which is the cost of not injecting.
 
-const { app, BrowserWindow, ipcMain, screen, Tray, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, screen, Tray, Menu, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
 const http = require("http");
 const { URL } = require("url");
+const { classify } = require("./clipboard-filter");
 
 const STORE = path.join(app.getPath("userData"), "settings.json");
 
@@ -61,7 +62,15 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Electron defaults this to true when nodeIntegration is off, but it is
+      // set explicitly so a future config change can't silently drop it. The
+      // renderer displays content from a server we do not control, so it gets
+      // the OS-level sandbox as well as context isolation.
+      sandbox: true,
+      // Nothing here needs to open another window, and a server-driven
+      // window.open would be a way out of the CSP.
+      webviewTag: false
     }
   });
 
@@ -70,6 +79,13 @@ function createWindow() {
   win.setAlwaysOnTop(true, "screen-saver");
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(path.join(__dirname, "renderer", "index.html"));
+
+  // The renderer only ever shows the local page. Any attempt to navigate away
+  // or spawn a window is either a bug or an attack, so both are refused
+  // outright rather than filtered.
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-navigate", (event) => event.preventDefault());
+  win.webContents.on("will-attach-webview", (event) => event.preventDefault());
 
   const remember = () => {
     if (!win || win.isDestroyed()) return;
@@ -96,6 +112,8 @@ function makeTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "Show", click: () => { if (win) { win.show(); win.focus(); } } },
     { label: "Clear feed", click: () => relay("clear") },
+    { label: "Watch clipboard", type: "checkbox", checked: clipboardWatching(),
+      click: (item) => setClipboardWatching(item.checked) },
     { type: "separator" },
     { label: "Re-pair\u2026", click: () => relay("repair") },
     { label: "Reset position", click: () => {
@@ -108,6 +126,97 @@ function makeTray() {
     { label: "Quit", click: () => app.quit() }
   ]));
   tray.on("click", () => { if (win) { win.show(); win.focus(); } });
+}
+
+// ── clipboard watching ──────────────────────────────────────
+// Electron has no clipboard-change event on Windows, so this polls. 500ms is
+// under human reaction time between copying and looking at the dashboard, and
+// reading the clipboard is cheap.
+//
+// OFF by default and remembered per machine. Reading someone's clipboard is
+// not a thing to switch on for them.
+const CLIP_POLL_MS = 500;
+let clipTimer = null;
+let lastClip = "";
+let clipStats = { sent: 0, ignored: 0, lastKind: null, lastAt: 0 };
+
+function clipboardWatching() {
+  return !!load().watchClipboard;
+}
+
+function setClipboardWatching(on) {
+  save({ watchClipboard: !!on });
+  if (on) startClipWatch();
+  else stopClipWatch();
+  relay("clipwatch", { on: !!on, stats: clipStats });
+  rebuildTrayMenu();
+}
+
+function startClipWatch() {
+  if (clipTimer) return;
+  // Seed with whatever is already on the clipboard so switching the feature on
+  // doesn't immediately fire off something copied ten minutes ago.
+  try { lastClip = clipboard.readText(); } catch (e) { lastClip = ""; }
+  clipTimer = setInterval(pollClipboard, CLIP_POLL_MS);
+}
+
+function stopClipWatch() {
+  if (clipTimer) { clearInterval(clipTimer); clipTimer = null; }
+}
+
+function pollClipboard() {
+  let text;
+  try { text = clipboard.readText(); } catch (e) { return; }
+  if (!text || text === lastClip) return;
+  lastClip = text;
+
+  // Everything the classifier rejects stops here and never touches the network.
+  const clip = classify(text);
+  if (!clip) {
+    clipStats.ignored += 1;
+    relay("clipwatch", { on: true, stats: clipStats, ignored: true });
+    return;
+  }
+  sendClip(clip);
+}
+
+function sendClip(clip) {
+  const { serverUrl, token } = load();
+  if (!serverUrl || !token) return;
+  let target;
+  try { target = new URL("/api/viewer/clip", serverUrl); } catch (e) { return; }
+
+  const lib = target.protocol === "https:" ? https : http;
+  const body = JSON.stringify(clip);
+  const req = lib.request(target, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(body),
+      Authorization: "Bearer " + token
+    }
+  }, (res) => {
+    let out = "";
+    res.setEncoding("utf8");
+    res.on("data", d => { out += d; });
+    res.on("end", () => {
+      let parsed = {};
+      try { parsed = JSON.parse(out); } catch (e) {}
+      clipStats.sent += 1;
+      clipStats.lastKind = clip.kind;
+      clipStats.lastAt = Date.now();
+      // delivered === 0 means no dashboard tab is open to receive it, which is
+      // worth saying rather than looking like it silently worked.
+      relay("clipwatch", {
+        on: true, stats: clipStats, sentKind: clip.kind,
+        delivered: res.statusCode === 200 ? (parsed.delivered || 0) : null,
+        error: res.statusCode === 200 ? null : (parsed.error || "HTTP " + res.statusCode)
+      });
+    });
+  });
+  req.on("error", (e) => relay("clipwatch", { on: true, stats: clipStats, error: e.message }));
+  req.write(body);
+  req.end();
 }
 
 function relay(channel, payload) {
@@ -321,6 +430,12 @@ ipcMain.handle("bump", async (_e, scanId) => {
   });
 });
 
+ipcMain.handle("clipwatch", (_e, on) => {
+  if (on === undefined) return { on: clipboardWatching(), stats: clipStats };
+  setClipboardWatching(on);
+  return { on: clipboardWatching(), stats: clipStats };
+});
+
 ipcMain.handle("close", () => app.quit());
 
 // ── lifecycle ───────────────────────────────────────────────
@@ -338,6 +453,7 @@ if (!gotLock) {
   app.on("before-quit", () => {
     quitting = true;
     stop();
+    stopClipWatch();
     if (tray) { tray.destroy(); tray = null; }
   });
 
@@ -347,5 +463,6 @@ if (!gotLock) {
     createWindow();
     makeTray();
     connect();
+    if (clipboardWatching()) startClipWatch();
   });
 }

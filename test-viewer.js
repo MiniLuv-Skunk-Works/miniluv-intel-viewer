@@ -6,7 +6,11 @@ const path = require("path");
 
 const main = fs.readFileSync(path.join(__dirname, "main.js"), "utf8");
 const pre = fs.readFileSync(path.join(__dirname, "preload.js"), "utf8");
-const html = fs.readFileSync(path.join(__dirname, "renderer", "index.html"), "utf8");
+// The renderer script now lives in app.js, extracted so the CSP can forbid
+// inline script. Checks that look for behaviour need both files.
+const markup = fs.readFileSync(path.join(__dirname, "renderer", "index.html"), "utf8");
+const rendererJs = fs.readFileSync(path.join(__dirname, "renderer", "app.js"), "utf8");
+const html = markup + "\n" + rendererJs;
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
 
 let pass = 0, fail = 0;
@@ -81,6 +85,18 @@ ok("timer comes from the feed, not the POST response",
    /The timer itself arrives over the feed/.test(main),
    "the bumper must see the same clock as everyone else");
 ok("cleared bumps hide the row", /onBumpCleared/.test(html) && /bumpCleared/.test(main));
+
+console.log("\n=== clipboard watching ===");
+ok("off by default", !/watchClipboard: true/.test(main) && /load\(\)\.watchClipboard/.test(main),
+   "reading someone's clipboard is not a thing to switch on for them");
+ok("filtered before anything is sent", /const clip = classify\(text\);[\s\S]{0,120}if \(!clip\)/.test(main),
+   "rejects must never reach the network");
+ok("seeded on enable, so old clipboard content is not fired off",
+   /lastClip = clipboard\.readText\(\)/.test(main));
+ok("button shows when armed", /armed/.test(html));
+ok("stopped on quit", /stopClipWatch\(\)/.test(main));
+ok("says when no dashboard tab is open", /no dashboard tab open/.test(html),
+   "otherwise a successful capture looks like nothing happened");
 
 console.log("\n=== entry layout ===");
 // Once a gank is called the FC knows the system; what they need on the title
