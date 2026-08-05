@@ -5,6 +5,7 @@ node_modules/
 # Build output. The exe belongs on a GitHub Release, not in the repo.
 dist/
 out/
+.build/
 # Belt and braces: a built or downloaded exe dragged in for testing would sit
 # outside dist/ and GitHub would happily offer to commit 90MB of it.
 *.exe
@@ -17,3 +18,6 @@ settings.json
 *.log
 .DS_Store
 Thumbs.db
+
+# Local implementation roadmap generated during repository review.
+IMPROVEMENTS.local.md

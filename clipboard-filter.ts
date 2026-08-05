@@ -1,4 +1,5 @@
 "use strict";
+import type { ClipboardCapture } from "./contracts";
 // Deciding what a clipboard capture is, and whether it should leave the machine.
 //
 // This runs in the VIEWER, deliberately. The alternative - post everything and
@@ -10,7 +11,7 @@
 // So the default is reject. Something has to look like EVE data to be sent.
 
 // Must stay identical to isSlotHeader in packages/core/src/parsing/index.ts.
-// test-clipboard.js asserts the two agree; if that fails, the dashboard and the
+// tests/test-clipboard.ts asserts the two agree; if that fails, the dashboard and the
 // viewer have started disagreeing about what a fit is.
 const SLOT_HEADER =
   /^(?:(?:high|med(?:ium)?|low)\s+power(?:\s+slots?)?|rig(?:\s+slots?)?s?|subsystem(?:\s+slots?)?s?)$/i;
@@ -37,11 +38,11 @@ const NEVER = [
   /password|passwd|secret|api[_ -]?key|bearer/i,
 ];
 
-function isSlotHeader(line) {
+export function isSlotHeader(line: unknown): boolean {
   return SLOT_HEADER.test(String(line).trim());
 }
 
-function looksLikeItemLine(line) {
+export function looksLikeItemLine(line: string): boolean {
   const t = line.trim();
   if (!t) return false;
   if (/^\[.*\]$/.test(t)) return true;              // [Obelisk, fit name]
@@ -56,7 +57,7 @@ function looksLikeItemLine(line) {
  * `vocabulary` is a Set of words that appear in real EVE item names, fetched
  * from the dashboard. Without it nothing is ever sent - see the note below.
  */
-function classify(raw, vocabulary) {
+export function classify(raw: unknown, vocabulary: ReadonlySet<string> | null): ClipboardCapture | null {
   const text = String(raw ?? "");
   if (!text.trim()) return null;
   if (text.length > 64_000) return null;
@@ -85,7 +86,7 @@ function classify(raw, vocabulary) {
   // any reason. One line is only accepted if it carries a quantity, which is
   // what makes it a cargo row rather than a word.
   if (lines.length === 1) {
-    const only = lines[0];
+    const only = lines[0]!;
     const quantified = QTY_TAB.test(only) || QTY_X.test(only) || QTY_LEAD.test(only);
     if (!quantified) return null;
   }
@@ -112,12 +113,12 @@ function classify(raw, vocabulary) {
 
 /** Strip quantities and punctuation, then require every remaining word to be
  *  one EVE uses in an item name. */
-function lineIsEveVocabulary(line, vocabulary) {
+export function lineIsEveVocabulary(line: string, vocabulary: ReadonlySet<string>): boolean {
   let name = line.trim();
   if (/^\[.*\]$/.test(name)) return true;          // [Obelisk, fit] / [empty slot]
   if (isSlotHeader(name)) return true;
 
-  name = name.split("\t")[0];                      // "Tritanium\t14,500,000"
+  name = name.split("\t")[0] ?? "";                // "Tritanium\t14,500,000"
   name = name.replace(/^[\d,]+\s*x\s+/i, "");      // "5000 x Foo"
   name = name.replace(/^[\d,]+\s+/, "");           // "5000 Foo"
   name = name.replace(/\s+[\d,]+$/, "");           // "Foo 5000"
@@ -127,4 +128,4 @@ function lineIsEveVocabulary(line, vocabulary) {
   return words.every(w => vocabulary.has(w));
 }
 
-module.exports = { classify, isSlotHeader, looksLikeItemLine, lineIsEveVocabulary, SLOT_HEADER };
+export { SLOT_HEADER };

@@ -237,9 +237,9 @@ The repo should be about 350 KB:
 .github/workflows/release.yml
 build/icon.ico  build/icon.png
 renderer/index.html  renderer/icon.png  renderer/icon-256.png
-main.js  preload.js
-package.json  package-lock.json
-.gitignore  BUILD.md  RELEASING.md  test-viewer.js
+main.ts  preload.ts  contracts.ts  clipboard-filter.ts  renderer/app.ts
+tests/*.ts  scripts/build-code.mjs  tsconfig.json
+package.json  package-lock.json  .gitignore  BUILD.md  RELEASING.md
 ```
 
 **Do commit `package-lock.json`.** `npm ci` in the release workflow needs it,

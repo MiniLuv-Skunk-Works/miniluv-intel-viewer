@@ -60,11 +60,16 @@ npm ci
 npm start
 ```
 
-Run the portable test suite:
+Type-check the application and tests, then run the portable test suite:
 
 ```powershell
+npm run typecheck
 npm test
 ```
+
+Development, tests, and packaging compile TypeScript into the ignored
+`.build\` directory automatically. Generated JavaScript is disposable and
+must not be committed.
 
 The clipboard tests can additionally compare their slot-header rule with a
 dashboard checkout when `DASHBOARD_CORE_PARSER` points to the dashboard's
@@ -96,11 +101,13 @@ manual recovery steps.
 
 | Path | Purpose |
 | --- | --- |
-| `main.js` | Electron main process, pairing, feed connection, tray, and clipboard polling |
-| `preload.js` | Narrow IPC bridge exposed to the sandboxed renderer |
-| `renderer/` | Viewer interface and live countdown behavior |
-| `clipboard-filter.js` | Local, fail-closed fit and cargo classifier |
-| `test-*.js` | Portable behavior, security, and clipboard checks |
+| `main.ts` | Electron main process, pairing, feed connection, tray, and clipboard polling |
+| `preload.ts` | Narrow, typed IPC bridge exposed to the sandboxed renderer |
+| `contracts.ts` | Shared IPC/domain types and runtime boundary parsers |
+| `renderer/` | TypeScript viewer interface, static HTML, icons, and live countdown behavior |
+| `clipboard-filter.ts` | Local, fail-closed fit and cargo classifier |
+| `tests/*.ts` | Portable behavior, security, clipboard, and contract checks |
+| `scripts/build-code.mjs` | Disposable esbuild production/test compilation |
 | `.github/workflows/` | PR, continuous, and stable release automation |
 
 ## Security model
