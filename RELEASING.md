@@ -38,6 +38,21 @@ a pinned message keeps working — **as long as the filename doesn't change**.
 That's an argument for dropping the version from the artifact name once you're
 past the first couple of releases.
 
+## Automated builds
+
+Pull requests build the portable executable and attach it to the workflow run
+as a 14-day Actions artifact. Unmerged code is never published as a release.
+
+Every push to `main` also updates the `continuous` prerelease and replaces
+`MILF-Viewer-latest.exe`. Its permanent download URL is:
+
+```
+https://github.com/MiniLuv-Skunk-Works/miniluv-intel-viewer/releases/download/continuous/MILF-Viewer-latest.exe
+```
+
+Version tags such as `v0.1.0` still create stable releases through
+`.github/workflows/release.yml`.
+
 ---
 
 ## Release notes template
