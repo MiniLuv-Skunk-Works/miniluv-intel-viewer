@@ -247,15 +247,15 @@
   var bumps = {};
 
   function paintBumps() {
-    var now = Date.now();
+    var now = performance.now();
     Object.keys(bumps).forEach(function (id) {
       var b = bumps[id];
       var row = document.querySelector('[data-bumprow="' + id + '"]');
       if (!row) return;
-      var elapsed = now - b.at;
-      var left = b.holdMs - elapsed;
+      var elapsed = now - b.receivedAt;
+      var left = b.remainingMs - elapsed;
       row.style.display = "flex";
-      var pct = Math.max(0, Math.min(100, (left / b.holdMs) * 100));
+      var pct = Math.max(0, Math.min(100, (left / b.totalMs) * 100));
       row.querySelector("i").style.width = pct + "%";
       // The number an FC reads out. Counts DOWN, because "how long have I got"
       // is the question, not "how long has it been".
@@ -293,6 +293,20 @@
   var bumpErrTimer = null;
 
   window.milf.onBump(function (b) {
+    // The server reports how much time remains; anchor that duration to this
+    // renderer's monotonic clock. Comparing its wall-clock timestamp with
+    // Date.now() here makes clock skew between the two machines shorten or
+    // lengthen the countdown immediately.
+    var remainingMs = Number(b.remainingMs);
+    if (!Number.isFinite(remainingMs)) {
+      // Older servers only send holdMs. Starting that duration on receipt is
+      // preferable to using their `at` timestamp and reintroducing clock skew.
+      remainingMs = Number(b.holdMs);
+    }
+    if (!Number.isFinite(remainingMs)) return;
+    b.remainingMs = Math.max(0, remainingMs);
+    b.totalMs = Math.max(1, Number(b.holdMs) || b.remainingMs || 1);
+    b.receivedAt = performance.now();
     bumps[b.scanId] = b;
     paintBumps();
   });

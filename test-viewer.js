@@ -68,9 +68,20 @@ ok("button click doesn't open the detail popup",
    /e\.target\.hasAttribute\("data-bump"\)\s*\)\s*return/.test(html),
    "the button sits inside the row, which is itself clickable");
 ok("countdown row per scan", /data-bumprow="/.test(html));
-ok("counts DOWN, not up", /var left = b\.holdMs - elapsed/.test(html) &&
+ok("counts DOWN, not up", /var left = b\.remainingMs - elapsed/.test(html) &&
    /left <= 0 \? "OUT"/.test(html),
    "an FC wants how long is left, not how long it has been");
+ok("countdown is immune to server/viewer clock skew",
+   /b\.receivedAt = performance\.now\(\)/.test(html) &&
+   /now = performance\.now\(\)/.test(html) &&
+   !/now - b\.at/.test(html),
+   "server wall-clock timestamps must not be compared with the viewer clock");
+ok("uses server-reported remaining time",
+   /remainingMs = Number\(b\.remainingMs\)/.test(html),
+   "active bumps must arrive with their remaining duration");
+ok("old servers fall back without using their clock",
+   /remainingMs = Number\(b\.holdMs\)/.test(html),
+   "legacy bump events should start locally rather than apply clock skew");
 ok("goes amber then red", /" warn"/.test(html) && /" gone"/.test(html));
 ok("amber is a fixed 30s, not a fraction of the hold", /left <= 30000/.test(html),
    "a percentage would go amber a full minute early on a 180s bump");
@@ -159,6 +170,8 @@ ok("single portable exe, no installer",
    pkg.build.win.target[0].target === "portable", JSON.stringify(pkg.build.win.target));
 ok("icon wired into the build", pkg.build.win.icon === "build/icon.ico");
 ok("build script present", !!pkg.scripts.build);
+ok("clipboard classifier included",
+   pkg.build.files.includes("clipboard-filter.js"));
 ok("renderer assets included", pkg.build.files.includes("renderer/**/*"));
 
 console.log("\n=== security posture unchanged ===");

@@ -23,6 +23,7 @@
     },
     "files": [
       "main.js",
+      "clipboard-filter.js",
       "preload.js",
       "renderer/**/*"
     ],
