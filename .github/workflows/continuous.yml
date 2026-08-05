@@ -1,0 +1,76 @@
+name: continuous Windows build
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: continuous-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: MILF-Viewer-${{ github.sha }}
+          path: dist/MILF-Viewer-*.exe
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  publish-continuous:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: MILF-Viewer-${{ github.sha }}
+          path: dist
+      - name: Prepare rolling asset
+        id: asset
+        shell: bash
+        run: |
+          mv dist/MILF-Viewer-*.exe dist/MILF-Viewer-latest.exe
+          echo "sha256=$(sha256sum dist/MILF-Viewer-latest.exe | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Update continuous prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ASSET_SHA256: ${{ steps.asset.outputs.sha256 }}
+        run: |
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/continuous" \
+            --method PATCH --field sha="$GITHUB_SHA" --field force=true >/dev/null 2>&1; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" \
+              --method POST --field ref="refs/tags/continuous" --field sha="$GITHUB_SHA" >/dev/null
+          fi
+
+          notes="Automatically rebuilt from main commit $GITHUB_SHA. SHA-256: $ASSET_SHA256"
+          if gh release view continuous >/dev/null 2>&1; then
+            gh release edit continuous \
+              --title "MILF Viewer continuous build" --notes "$notes" --prerelease
+          else
+            gh release create continuous --verify-tag --latest=false \
+              --title "MILF Viewer continuous build" --notes "$notes" --prerelease
+          fi
+
+          gh release upload continuous dist/MILF-Viewer-latest.exe --clobber

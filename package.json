@@ -7,6 +7,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "test": "node test-viewer.js && node test-security.js && node test-clipboard.js",
     "build": "electron-builder --win --publish never"
   },
   "devDependencies": {

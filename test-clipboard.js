@@ -73,9 +73,9 @@ for (const [what, text] of Object.entries(cargo)) {
 console.log("\n=== the slot-header rule matches the dashboard's ===");
 // If these drift, the viewer and the dashboard disagree about what a fit is,
 // and captures land in the wrong field with no error anywhere.
-const coreSrc = fs.readFileSync(
+const corePath = process.env.DASHBOARD_CORE_PARSER ||
   path.join(__dirname, "..", "d5", "miniluv-intel-dashboard-main",
-            "packages", "core", "src", "parsing", "index.ts"), "utf8");
+            "packages", "core", "src", "parsing", "index.ts");
 const cases = [
   ["High Power", true], ["Medium Power", true], ["Med Power", true], ["Low Power", true],
   ["High Power Slot", true], ["Low Power Slots", true],
@@ -87,10 +87,15 @@ for (const [line, expected] of cases) {
   ok(`"${line}" -> ${expected ? "header" : "not a header"}`,
      isSlotHeader(line) === expected, String(isSlotHeader(line)));
 }
-ok("dashboard still uses the rule this was copied from",
-   /high\|med\(ium\)\?\|low\)\\s\+power/.test(coreSrc.replace(/\s+/g, " ")) ||
-   /\(high\|med\(ium\)\?\|low\)/.test(coreSrc),
-   "packages/core/src/parsing/index.ts changed - re-check the copy here");
+if (fs.existsSync(corePath)) {
+  const coreSrc = fs.readFileSync(corePath, "utf8");
+  ok("dashboard still uses the rule this was copied from",
+     /high\|med\(ium\)\?\|low\)\\s\+power/.test(coreSrc.replace(/\s+/g, " ")) ||
+     /\(high\|med\(ium\)\?\|low\)/.test(coreSrc),
+     "packages/core/src/parsing/index.ts changed - re-check the copy here");
+} else {
+  console.log("  SKIP  dashboard parser comparison (set DASHBOARD_CORE_PARSER to enable)");
+}
 
 console.log("\n=== shape alone is not enough ===");
 // Everything here has the shape of "a number next to a word", which an earlier
