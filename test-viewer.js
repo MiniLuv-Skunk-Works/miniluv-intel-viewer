@@ -68,7 +68,7 @@ ok("button click doesn't open the detail popup",
    /e\.target\.hasAttribute\("data-bump"\)\s*\)\s*return/.test(html),
    "the button sits inside the row, which is itself clickable");
 ok("countdown row per scan", /data-bumprow="/.test(html));
-ok("counts DOWN, not up", /var left = b\.holdMs - elapsed/.test(html) &&
+ok("counts DOWN, not up", /var left = b\.remainingMs - elapsed/.test(html) &&
    /left <= 0 \? "OUT"/.test(html),
    "an FC wants how long is left, not how long it has been");
 ok("goes amber then red", /" warn"/.test(html) && /" gone"/.test(html));
@@ -89,14 +89,29 @@ ok("cleared bumps hide the row", /onBumpCleared/.test(html) && /bumpCleared/.tes
 console.log("\n=== clipboard watching ===");
 ok("off by default", !/watchClipboard: true/.test(main) && /load\(\)\.watchClipboard/.test(main),
    "reading someone's clipboard is not a thing to switch on for them");
-ok("filtered before anything is sent", /const clip = classify\(text\);[\s\S]{0,120}if \(!clip\)/.test(main),
+ok("filtered before anything is sent", /classify\(text, vocabulary\)/.test(main) && /if \(!clip\)/.test(main),
    "rejects must never reach the network");
 ok("seeded on enable, so old clipboard content is not fired off",
    /lastClip = clipboard\.readText\(\)/.test(main));
 ok("button shows when armed", /armed/.test(html));
 ok("stopped on quit", /stopClipWatch\(\)/.test(main));
+ok("vocabulary fetched and cached", /fetchVocabulary/.test(main) && /vocabulary\.json/.test(main));
+ok("re-fetched on a new pairing", /vocabulary = null;[\s\S]{0,40}fetchVocabulary/.test(main),
+   "a different dashboard may run a different SDE build");
 ok("says when no dashboard tab is open", /no dashboard tab open/.test(html),
    "otherwise a successful capture looks like nothing happened");
+
+console.log("\n=== bump timers survive clock skew ===");
+// The bug: left = holdMs - (Date.now() - serverAt) subtracts the viewer's
+// clock from the server's. A viewer 40s fast opened a fresh 3:00 at 2:20.
+ok("no server timestamp in the countdown", !/now - b\.at/.test(html),
+   "cross-machine subtraction is the whole fault");
+ok("anchored to local receipt time", /b\.receivedAt = Date\.now\(\)/.test(html) &&
+   /now - b\.receivedAt/.test(html));
+ok("counts down from server-supplied remaining", /b\.remainingMs - elapsed/.test(html));
+ok("bar scales to what was left on arrival", /left \/ span/.test(html),
+   "a replayed hold should show a part-full bar, not start over");
+ok("tolerates an older server", /typeof b\.remainingMs !== "number"/.test(html));
 
 console.log("\n=== entry layout ===");
 // Once a gank is called the FC knows the system; what they need on the title
@@ -155,6 +170,18 @@ ok("window icon is inside build.files",
    "build/ is buildResources - not present in the packaged app");
 
 console.log("\n=== packaging ===");
+// Every local require() must be inside build.files. Missing one works
+// perfectly in `npm start` and throws MODULE_NOT_FOUND only in the built exe,
+// which is the worst place to find out.
+const localRequires = [...(main + pre).matchAll(/require\("\.\/([^"]+)"\)/g)]
+  .map((m) => (m[1].endsWith(".js") ? m[1] : m[1] + ".js"));
+const packaged = pkg.build.files;
+const covered = (file) => packaged.some((pattern) =>
+  pattern === file || (pattern.endsWith("/**/*") && file.startsWith(pattern.slice(0, -5))));
+const missing = [...new Set(localRequires)].filter((f) => !covered(f));
+ok("every required file is packaged", missing.length === 0, missing.join(", "));
+console.log("    requires: " + [...new Set(localRequires)].join(", "));
+
 ok("single portable exe, no installer",
    pkg.build.win.target[0].target === "portable", JSON.stringify(pkg.build.win.target));
 ok("icon wired into the build", pkg.build.win.icon === "build/icon.ico");

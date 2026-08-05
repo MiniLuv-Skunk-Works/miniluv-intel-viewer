@@ -53,10 +53,10 @@ function looksLikeItemLine(line) {
 /**
  * Returns { kind: "fit" | "cargo", text } if this should be sent, or null.
  *
- * kind is decided by the first meaningful line: a slot header means the game
- * gave us a fitting, anything else is treated as cargo.
+ * `vocabulary` is a Set of words that appear in real EVE item names, fetched
+ * from the dashboard. Without it nothing is ever sent - see the note below.
  */
-function classify(raw) {
+function classify(raw, vocabulary) {
   const text = String(raw ?? "");
   if (!text.trim()) return null;
   if (text.length > 64_000) return null;
@@ -68,23 +68,63 @@ function classify(raw) {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   if (!lines.length) return null;
 
-  // A single line is the ambiguous case - "Damage Control II" is an item, but
-  // so is half the English language. One line is only accepted if it carries a
-  // quantity, which prose does not.
+  // Shape alone is not enough, and this is the whole lesson of this filter.
+  // "a number next to a word" also describes a credit card, a phone number, a
+  // postcode and a shopping list - all of which an earlier version of this
+  // happily forwarded. So a capture must also be written in EVE's vocabulary.
+  //
+  // No vocabulary means fail closed. Sending nothing is a broken feature;
+  // sending someone's clipboard because the word list had not downloaded yet
+  // is a breach.
+  if (!vocabulary || typeof vocabulary.has !== "function" || vocabulary.size === 0) {
+    return null;
+  }
+
+  // A single line is the ambiguous case. "Obelisk" is a real EVE word, so the
+  // vocabulary check passes it - but so would any one word someone copied for
+  // any reason. One line is only accepted if it carries a quantity, which is
+  // what makes it a cargo row rather than a word.
   if (lines.length === 1) {
     const only = lines[0];
     const quantified = QTY_TAB.test(only) || QTY_X.test(only) || QTY_LEAD.test(only);
     if (!quantified) return null;
-    return { kind: "cargo", text };
   }
 
-  // Otherwise most of it has to read as inventory. A stray line is fine; a
-  // paragraph of chat with one item name in it is not.
-  const matching = lines.filter(looksLikeItemLine).length;
-  if (matching / lines.length < 0.8) return null;
+  const isFit = isSlotHeader(lines.find(l => !/^\[.*\]$/.test(l)) ?? lines[0]);
 
-  const first = lines.find(l => !/^\[.*\]$/.test(l)) ?? lines[0];
-  return { kind: isSlotHeader(first) ? "fit" : "cargo", text };
+  let itemish = 0;
+  let vocabHits = 0;
+  for (const line of lines) {
+    if (!looksLikeItemLine(line)) continue;
+    itemish += 1;
+    if (lineIsEveVocabulary(line, vocabulary)) vocabHits += 1;
+  }
+
+  if (itemish / lines.length < 0.8) return null;
+
+  // Every line that names something must name something EVE knows about.
+  // One unrecognised line is tolerated - a new item after a patch, a typo -
+  // but a list of names or groceries fails this outright.
+  if (vocabHits < Math.max(1, itemish - 1)) return null;
+
+  return { kind: isFit ? "fit" : "cargo", text };
 }
 
-module.exports = { classify, isSlotHeader, looksLikeItemLine, SLOT_HEADER };
+/** Strip quantities and punctuation, then require every remaining word to be
+ *  one EVE uses in an item name. */
+function lineIsEveVocabulary(line, vocabulary) {
+  let name = line.trim();
+  if (/^\[.*\]$/.test(name)) return true;          // [Obelisk, fit] / [empty slot]
+  if (isSlotHeader(name)) return true;
+
+  name = name.split("\t")[0];                      // "Tritanium\t14,500,000"
+  name = name.replace(/^[\d,]+\s*x\s+/i, "");      // "5000 x Foo"
+  name = name.replace(/^[\d,]+\s+/, "");           // "5000 Foo"
+  name = name.replace(/\s+[\d,]+$/, "");           // "Foo 5000"
+
+  const words = name.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 2);
+  if (!words.length) return false;
+  return words.every(w => vocabulary.has(w));
+}
+
+module.exports = { classify, isSlotHeader, looksLikeItemLine, lineIsEveVocabulary, SLOT_HEADER };

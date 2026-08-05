@@ -252,10 +252,13 @@
       var b = bumps[id];
       var row = document.querySelector('[data-bumprow="' + id + '"]');
       if (!row) return;
-      var elapsed = now - b.at;
-      var left = b.holdMs - elapsed;
+      var elapsed = now - b.receivedAt;          // local clock, both ends
+      var left = b.remainingMs - elapsed;
+      // The bar is drawn against whatever was left when it arrived, so a
+      // replayed hold shows a part-full bar rather than starting over.
+      var span = Math.max(1, b.remainingMs);
       row.style.display = "flex";
-      var pct = Math.max(0, Math.min(100, (left / b.holdMs) * 100));
+      var pct = Math.max(0, Math.min(100, (left / span) * 100));
       row.querySelector("i").style.width = pct + "%";
       // The number an FC reads out. Counts DOWN, because "how long have I got"
       // is the question, not "how long has it been".
@@ -293,6 +296,21 @@
   var bumpErrTimer = null;
 
   window.milf.onBump(function (b) {
+    // Anchor to the LOCAL clock at the moment of receipt.
+    //
+    // The server sends remainingMs rather than a timestamp, so the countdown
+    // never subtracts a server clock from this one. Previously it did, and any
+    // skew between the two machines showed up directly in the timer - a viewer
+    // 40 seconds fast opened a fresh 3:00 bump already reading 2:20.
+    //
+    // Everything from here on is one machine's clock measured against itself.
+    b.receivedAt = Date.now();
+    if (typeof b.remainingMs !== "number") {
+      // An older server that still sends only holdMs/at. Falling back to the
+      // full hold is wrong for a replayed bump, but it is bounded and obvious,
+      // where cross-clock subtraction is unbounded and silent.
+      b.remainingMs = b.holdMs || 0;
+    }
     bumps[b.scanId] = b;
     paintBumps();
   });

@@ -140,6 +140,50 @@ let clipTimer = null;
 let lastClip = "";
 let clipStats = { sent: 0, ignored: 0, lastKind: null, lastAt: 0 };
 
+// EVE's item vocabulary, fetched from the dashboard and cached. The filter
+// refuses to send anything until this arrives - see clipboard-filter.js.
+let vocabulary = null;
+const VOCAB_FILE = () => path.join(app.getPath("userData"), "vocabulary.json");
+
+function loadVocabulary() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(VOCAB_FILE(), "utf8"));
+    if (Array.isArray(raw.words) && raw.words.length) {
+      vocabulary = new Set(raw.words);
+      return raw.buildNumber;
+    }
+  } catch (e) { /* first run, or the cache is unreadable */ }
+  return null;
+}
+
+function fetchVocabulary() {
+  const { serverUrl, token } = load();
+  if (!serverUrl || !token) return;
+  let target;
+  try { target = new URL("/api/viewer/vocabulary", serverUrl); } catch (e) { return; }
+  const lib = target.protocol === "https:" ? https : http;
+  const req = lib.request(target, {
+    method: "GET", headers: { Authorization: "Bearer " + token }
+  }, (res) => {
+    if (res.statusCode !== 200) { res.resume(); return; }
+    let out = "";
+    res.setEncoding("utf8");
+    res.on("data", d => { out += d; });
+    res.on("end", () => {
+      try {
+        const parsed = JSON.parse(out);
+        if (!Array.isArray(parsed.words) || !parsed.words.length) return;
+        vocabulary = new Set(parsed.words);
+        fs.writeFileSync(VOCAB_FILE(), JSON.stringify(parsed));
+        relay("clipwatch", { on: clipboardWatching(), stats: clipStats,
+                             vocabulary: vocabulary.size });
+      } catch (e) { /* leave the cached one in place */ }
+    });
+  });
+  req.on("error", () => {});
+  req.end();
+}
+
 function clipboardWatching() {
   return !!load().watchClipboard;
 }
@@ -171,9 +215,12 @@ function pollClipboard() {
   lastClip = text;
 
   // Everything the classifier rejects stops here and never touches the network.
-  const clip = classify(text);
+  const clip = classify(text, vocabulary);
   if (!clip) {
     clipStats.ignored += 1;
+    // Distinguish "not EVE data" from "cannot tell yet", or the feature looks
+    // broken on first run rather than merely not ready.
+    if (!vocabulary) fetchVocabulary();
     relay("clipwatch", { on: true, stats: clipStats, ignored: true });
     return;
   }
@@ -337,6 +384,8 @@ ipcMain.handle("pair", async (_e, { serverUrl, code }) => {
         try { parsed = JSON.parse(out); } catch (e) {}
         if (res.statusCode === 200 && parsed.token) {
           save({ serverUrl: serverUrl, token: parsed.token });
+          vocabulary = null;
+          fetchVocabulary();
           retryMs = 1000;
           stop(); connect();
           resolve({ ok: true });
@@ -431,7 +480,11 @@ ipcMain.handle("bump", async (_e, scanId) => {
 });
 
 ipcMain.handle("clipwatch", (_e, on) => {
-  if (on === undefined) return { on: clipboardWatching(), stats: clipStats };
+  if (on === undefined) {
+    return { on: clipboardWatching(), stats: clipStats,
+             vocabulary: vocabulary ? vocabulary.size : 0 };
+  }
+  if (on && !vocabulary) fetchVocabulary();
   setClipboardWatching(on);
   return { on: clipboardWatching(), stats: clipStats };
 });
@@ -463,6 +516,8 @@ if (!gotLock) {
     createWindow();
     makeTray();
     connect();
+    loadVocabulary();
+    fetchVocabulary();          // refresh in the background; cache covers the gap
     if (clipboardWatching()) startClipWatch();
   });
 }

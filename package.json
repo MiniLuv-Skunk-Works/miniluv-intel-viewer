@@ -24,6 +24,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "clipboard-filter.js",
       "renderer/**/*"
     ],
     "win": {

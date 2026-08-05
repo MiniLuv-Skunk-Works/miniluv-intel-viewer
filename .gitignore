@@ -4,6 +4,11 @@ node_modules/
 
 # Build output. The exe belongs on a GitHub Release, not in the repo.
 dist/
+out/
+# Belt and braces: a built or downloaded exe dragged in for testing would sit
+# outside dist/ and GitHub would happily offer to commit 90MB of it.
+*.exe
+*.exe.blockmap
 
 # Local viewer settings: server address and pairing token. The token grants
 # read access to the intel feed, so this must never be committed.
