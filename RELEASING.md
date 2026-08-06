@@ -44,14 +44,47 @@ Pull requests build the portable executable and attach it to the workflow run
 as a 14-day Actions artifact. Unmerged code is never published as a release.
 
 Every push to `main` also updates the `continuous` prerelease and replaces
-`MILF-Viewer-latest.exe`. Its permanent download URL is:
+`MILF-Viewer-latest.exe` and `MILF-Viewer-latest.exe.sha256`. Its permanent
+executable download URL is:
 
 ```
 https://github.com/MiniLuv-Skunk-Works/miniluv-intel-viewer/releases/download/continuous/MILF-Viewer-latest.exe
 ```
 
-Version tags such as `v0.1.0` still create stable releases through
-`.github/workflows/release.yml`.
+Version tags create stable releases through `.github/workflows/release.yml`.
+The tag must exactly equal `v` plus the `package.json` version, and its commit
+must be reachable from `main`. A stable release contains the versioned `.exe`,
+its `.exe.sha256` manifest, and an SPDX JSON SBOM.
+
+### Verifying release artifacts
+
+Download the executable and matching `.sha256` file into the same directory,
+then compare the expected and actual digest in PowerShell:
+
+```powershell
+$download = "MILF-Viewer-0.4.0.exe"
+$expected = ((Get-Content "$download.sha256" -Raw) -split '\s+')[0]
+$actual = (Get-FileHash $download -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -cne $expected) { throw "SHA-256 checksum mismatch for $download" }
+```
+
+The checksum manifest uses standard `sha256sum` syntax, so operators on Linux
+or in Git Bash can instead run `sha256sum --check <file>.sha256`.
+
+Every published executable has GitHub-hosted build provenance. Stable
+executables also have a signed SPDX SBOM statement:
+
+```powershell
+gh attestation verify $download --repo MiniLuv-Skunk-Works/miniluv-intel-viewer
+gh attestation verify $download `
+  --repo MiniLuv-Skunk-Works/miniluv-intel-viewer `
+  --predicate-type https://spdx.dev/Document/v2.3
+```
+
+The first command identifies the repository, commit, and workflow that
+produced the file. The second validates the dependency statement. The readable
+`MILF-Viewer-<version>.spdx.json` release asset is retained alongside every
+stable executable for inspection and archival.
 
 ---
 
@@ -80,36 +113,18 @@ and quietly don't use the tool.
 
 ---
 
-## Automating it
+## Automated stable releases
 
-`.github/workflows/release.yml` — pushing a tag builds and publishes on its own:
+The release workflow validates the tag and `main` ancestry before doing any
+expensive work. Its Windows build/test job has read-only repository access and
+hands an immutable artifact to separate no-checkout jobs. One job writes only
+GitHub attestations; the final job receives only the release-content permission
+needed to publish the already-built files. All external actions are pinned to
+immutable commit SHAs and maintained by Dependabot.
 
-```yaml
-name: release
-on:
-  push:
-    tags: ["v*"]
-
-permissions:
-  contents: write
-
-jobs:
-  build:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - run: npm ci
-      - run: npm run build
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*.exe
-          generate_release_notes: true
-```
-
-Then a release is:
+After changing `package.json` and `package-lock.json` to the intended version,
+merging that commit to `main`, and passing the full verification gate, release
+it with a matching tag:
 
 ```
 git tag v0.1.1
@@ -117,8 +132,9 @@ git push origin v0.1.1
 ```
 
 `runs-on: windows-latest` matters — electron-builder needs Windows to produce a
-Windows exe. `npm ci` rather than `npm install` so the build uses the exact
-locked versions.
+Windows exe. `npm ci` rather than `npm install` ensures the build uses the exact
+locked versions. A mismatched tag or a tag pointing outside `main` fails before
+packaging and cannot publish a release.
 
 ---
 
@@ -173,7 +189,11 @@ projects. Worth an application before paying anyone.
 
 Ship unsigned, and put the SmartScreen note in every release body. It's one
 extra click for the user, and it's honest. Revisit if MiniLuv ever distributes
-widely enough that reputation would actually build.
+widely enough that reputation would actually build or organizational policy
+requires signing. Checksums, provenance, and SBOM attestations establish a
+verification path but do not replace Authenticode. Do not add automatic
+executable replacement unless a future update design verifies signed metadata
+or equivalent trusted release information before installation.
 
 ---
 

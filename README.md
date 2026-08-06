@@ -16,6 +16,39 @@ target machine does not need Node.js.
 > Windows SmartScreen may show **Windows protected your PC** because the
 > executable is not code-signed. Select **More info**, then **Run anyway**.
 
+### Verify a download
+
+Each release includes a SHA-256 checksum file beside the executable. For a
+stable release, replace the example version below with the version you
+downloaded; for the continuous build, use `MILF-Viewer-latest.exe` instead.
+
+```powershell
+$download = "MILF-Viewer-0.4.0.exe"
+$expected = ((Get-Content "$download.sha256" -Raw) -split '\s+')[0]
+$actual = (Get-FileHash $download -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -cne $expected) { throw "SHA-256 checksum mismatch for $download" }
+```
+
+GitHub also records signed build provenance for stable and continuous
+executables. With the GitHub CLI installed, verify that the file was produced
+by this repository's workflow:
+
+```powershell
+gh attestation verify $download --repo MiniLuv-Skunk-Works/miniluv-intel-viewer
+```
+
+Stable releases additionally include an SPDX JSON software bill of materials
+and an SBOM attestation. Verify the signed dependency statement with:
+
+```powershell
+gh attestation verify $download `
+  --repo MiniLuv-Skunk-Works/miniluv-intel-viewer `
+  --predicate-type https://spdx.dev/Document/v2.3
+```
+
+Checksums and attestations provide integrity and provenance; they do not make
+an unsigned executable trusted by Windows SmartScreen.
+
 ## Setup
 
 1. Download and run the viewer.
@@ -170,8 +203,14 @@ GitHub Actions handles the build paths:
 - Pull requests targeting `main` run the tests, build the Windows executable,
   and retain it as a workflow artifact for 14 days.
 - Pushes to `main` update the rolling `continuous` prerelease and its stable
-  `MILF-Viewer-latest.exe` download URL.
-- Tags matching `v*` build a versioned stable release.
+  `MILF-Viewer-latest.exe` download URL, checksum, and provenance attestation.
+- Tags matching the exact `v<package.json version>` value build a versioned
+  stable release only when the tagged commit is part of `main` history. Stable
+  releases include the executable, checksum, SPDX SBOM, and attestations.
+
+Build/test jobs are read-only. Separate no-checkout jobs attest the immutable
+workflow payload and publish it with only the permissions required for those
+operations. The viewer does not download or replace executables automatically.
 
 See [RELEASING.md](RELEASING.md) for release notes, signing considerations, and
 manual recovery steps.
