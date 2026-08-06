@@ -22,6 +22,7 @@ export const PROTOCOL_CAPABILITIES = {
   bumpControl: "bump-control",
   clipboardRelay: "clipboard-relay",
   clipboardVocabulary: "clipboard-vocabulary",
+  scanReplay: "scan-replay",
 } as const;
 
 export type KnownCapability = typeof PROTOCOL_CAPABILITIES[keyof typeof PROTOCOL_CAPABILITIES];
@@ -165,10 +166,17 @@ export interface ClaimResponse {
   token: string;
 }
 
+export type ViewerReplayStatus = "snapshot" | "resumed" | "cursor-expired";
+
+export interface ViewerReplayMetadata {
+  status: ViewerReplayStatus;
+}
+
 export interface HelloEvent {
   name: string;
   protocolVersion?: number;
   capabilities?: KnownCapability[];
+  replay?: ViewerReplayMetadata;
 }
 
 export interface ProtocolNegotiation {
@@ -376,6 +384,14 @@ export function parseBumpClearedEvent(value: unknown): BumpClearedEvent | null {
   return scanId === null ? null : { scanId };
 }
 
+export function parseViewerReplayMetadata(value: unknown): ViewerReplayMetadata | null {
+  const replay = plainRecord(value);
+  if (!replay || !hasOnlyKeys(replay, ["status"]) ||
+      (replay.status !== "snapshot" && replay.status !== "resumed" &&
+       replay.status !== "cursor-expired")) return null;
+  return { status: replay.status };
+}
+
 export function parseHelloEvent(value: unknown): HelloEvent | null {
   const source = plainRecord(value);
   const name = source ? boundedString(source.name, VALIDATION_LIMITS.label, 1) : null;
@@ -394,6 +410,11 @@ export function parseHelloEvent(value: unknown): HelloEvent | null {
         !source.capabilities.every((capability) =>
           boundedString(capability, VALIDATION_LIMITS.label, 1) !== null)) return null;
     result.capabilities = [...new Set(source.capabilities.filter(isKnownCapability))];
+  }
+  if (source?.replay !== undefined) {
+    const replay = parseViewerReplayMetadata(source.replay);
+    if (!replay) return null;
+    result.replay = replay;
   }
   return result;
 }

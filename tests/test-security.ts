@@ -9,6 +9,7 @@ const app = fs.readFileSync(path.join(ROOT, ".build", "renderer", "app.js"), "ut
 const appSource = fs.readFileSync(path.join(ROOT, "renderer", "app.ts"), "utf8");
 const html = fs.readFileSync(path.join(ROOT, "renderer", "index.html"), "utf8");
 const main = fs.readFileSync(path.join(ROOT, "main.ts"), "utf8");
+const feedConnection = fs.readFileSync(path.join(ROOT, "feed-connection.ts"), "utf8");
 
 let pass = 0, fail = 0;
 const ok = (name: string, condition: unknown, detail?: unknown): void => {
@@ -184,7 +185,8 @@ ok("settings token is migration-only and removed",
    /initialized\.removeLegacyToken\) save\(\{\}, \["token"\]\)/.test(main) &&
    !/save\(\{[^}]*token:/.test(main));
 ok("authentication expiry clears encrypted credentials",
-   /statusCode === 401 \|\| res\.statusCode === 403[\s\S]{0,240}credentials\?\.clear\(\)/.test(main));
+   /status === 401 \|\| status === 403[\s\S]{0,180}onUnauthorized\(\)/.test(feedConnection) &&
+   /async function expirePairing[\s\S]{0,220}credentials\?\.clear\(\)/.test(main));
 ok("all authenticated requests read the validated session",
    (main.match(/const auth = session\(\)/g) || []).length === 4 &&
    !/\{ serverUrl, token \} = load\(\)/.test(main));

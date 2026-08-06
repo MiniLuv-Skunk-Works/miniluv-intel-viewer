@@ -97,9 +97,10 @@ dashboard checkout when `DASHBOARD_CORE_PARSER` points to the dashboard's
 ### Dashboard protocol compatibility
 
 This viewer supports dashboard protocol version 1. A version-1 dashboard with
-all four known capabilities (`scan-feed`, `bump-control`, `clipboard-relay`,
-and `clipboard-vocabulary`) is fully compatible. Unknown capability names are
-ignored so dashboards can add optional features independently.
+all five known capabilities (`scan-feed`, `bump-control`, `clipboard-relay`,
+`clipboard-vocabulary`, and `scan-replay`) is fully compatible. Unknown
+capability names are ignored so dashboards can add optional features
+independently.
 
 Compatibility is deliberately friendly to independent releases:
 
@@ -112,6 +113,18 @@ Compatibility is deliberately friendly to independent releases:
   relay until that protocol version is supported.
 - Adding fields does not require a protocol version increase. Semantic changes
   do, and new optional behavior should be advertised as a capability.
+
+Dashboards advertising `scan-replay` put the stable scan ID in each scan SSE
+frame's `id` field. The viewer retains validated IDs in memory for the current
+pairing, sends the latest HTTP-header-safe one as `Last-Event-ID` after a
+network interruption, and suppresses duplicate replayed/live scan IDs. If an
+ID cannot be represented verbatim in Node's HTTP header, the previous cursor
+requests a wider replay and deduplication removes the overlap. The cursor is
+not written to disk, so starting the app or changing pairings requests the
+dashboard's normal retained snapshot. A `hello.replay.status` of
+`cursor-expired` means the dashboard no longer has the requested position; the
+viewer warns about the unrecoverable gap while accepting the complete retained
+window that follows. Bump events never advance the scan cursor.
 
 The viewer has no runtime dependency on dashboard source or packages. It keeps
 a self-contained representative fixture at
@@ -150,9 +163,11 @@ manual recovery steps.
 
 | Path | Purpose |
 | --- | --- |
-| `main.ts` | Electron main process, pairing, feed connection, tray, and clipboard polling |
+| `main.ts` | Electron lifecycle, pairing orchestration, tray, and clipboard polling |
 | `preload.ts` | Narrow, typed IPC bridge exposed to the sandboxed renderer |
 | `contracts.ts` | Shared IPC/domain types and runtime boundary parsers |
+| `dashboard-client.ts` | Bounded, cancellable JSON requests with normalized failures |
+| `feed-connection.ts` | Single-owner SSE connection, parsing, replay cursor/deduplication, idle detection, and jittered retry |
 | `dashboard-url.ts` | HTTPS and explicit loopback-development origin policy |
 | `credentials.ts` | OS-encrypted bearer credential storage and migration |
 | `ipc-security.ts` | Viewer-window and main-frame IPC authorization |

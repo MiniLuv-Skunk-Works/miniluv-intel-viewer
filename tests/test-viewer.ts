@@ -6,6 +6,7 @@ import * as path from "node:path";
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const main = fs.readFileSync(path.join(ROOT, "main.ts"), "utf8");
+const dashboardClient = fs.readFileSync(path.join(ROOT, "dashboard-client.ts"), "utf8");
 const pre = fs.readFileSync(path.join(ROOT, "preload.ts"), "utf8");
 // The renderer script now lives in app.js, extracted so the CSP can forbid
 // inline script. Checks that look for behaviour need both files.
@@ -94,7 +95,8 @@ ok("shows OUT when the hold lapses", /"OUT"/.test(html));
 ok("names the bumper and the re-bump count", /b\.by \+/.test(html) && /b\.count > 1/.test(html));
 ok("timers survive a re-render", /paintBumps\(\);\s*\/\/ a re-render/.test(html),
    "the scan list redraws on every new scan");
-ok("bump sent with the viewer token", /"Authorization": "Bearer " \+ token/.test(main));
+ok("bump sent with the viewer token", /token,\s*\n\s*body: \{ scanId \}/.test(main) &&
+   /Authorization: "Bearer " \+ request\.token/.test(dashboardClient));
 ok("timer comes from the feed, not the POST response",
    /The timer itself arrives over the feed/.test(main),
    "the bumper must see the same clock as everyone else");
@@ -129,6 +131,14 @@ ok("future dashboards retain scan feed with a compact warning",
    /newer - scan feed only/.test(main));
 ok("compatibility warnings survive transient messages",
    /protocolNotice/.test(html) && /s = protocolNotice/.test(html));
+ok("scan replay is enabled only from the advertised capability",
+   /protocol\.capabilities\.includes\(PROTOCOL_CAPABILITIES\.scanReplay\)/.test(main) &&
+   /feedConnection\.setReplayEnabled\(replaySupported\)/.test(main));
+ok("scan cursors must match validated scan IDs",
+   /id !== undefined && id !== scan\.id/.test(main));
+ok("expired replay history produces a compact gap warning",
+   /hello\.replay\?\.status === "cursor-expired"/.test(main) &&
+   /Replay history expired/.test(main));
 
 console.log("\n=== bump timers survive clock skew ===");
 // The bug: left = holdMs - (Date.now() - serverAt) subtracts the viewer's
