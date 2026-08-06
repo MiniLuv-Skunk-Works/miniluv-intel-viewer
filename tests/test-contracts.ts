@@ -6,6 +6,7 @@ import {
   negotiateProtocol,
   parseBumpClearedEvent,
   parseBumpEvent,
+  parseBumpResponse,
   parseClaimResponse,
   parseClipboardRelayResponse,
   parseClipboardResult,
@@ -105,6 +106,10 @@ ok("scan rejects unsafe and negative numbers", parseScan({ id: "bad", at: -1 }) 
 const bump = parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 2, holdMs: 180000, remainingMs: 90000, future: true });
 ok("valid bump parses", bump?.remainingMs === 90000);
 ok("legacy bump without remaining parses", parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 1, holdMs: 180000 }) !== null);
+ok("dashboard bump response parses as an event", parseBumpResponse({
+  scanId: "scan-1", at: 1_700_000_000_000, by: "pilot", count: 1, holdMs: 180000,
+})?.scanId === "scan-1");
+ok("IPC acknowledgement is not a dashboard bump response", parseBumpResponse({ ok: true }) === null);
 ok("bump rejects malformed duration", parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 1, holdMs: "never" }) === null);
 ok("bump rejects out-of-range values", parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 0, holdMs: 1 }) === null &&
    parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 1, holdMs: 86_400_001 }) === null);
@@ -226,6 +231,8 @@ ok("fixture hello matches protocol v1", fixtureHello?.protocolVersion === 1 &&
    negotiateProtocol(fixtureHello).compatibility === "fully-compatible");
 ok("fixture scan parses", parseScan(eventValue(fixture, ["scan", "scanEvent"])) !== null);
 ok("fixture bump event parses", parseBumpEvent(eventValue(fixture, ["bumpEvent", "bump"])) !== null);
+const fixtureApiResponses = asRecord(asRecord(fixture)?.apiResponses);
+ok("fixture bump API response parses", parseBumpResponse(response(fixtureApiResponses?.bump)) !== null);
 ok("fixture bump-cleared event parses", parseBumpClearedEvent(eventValue(fixture, ["bumpCleared", "bumpClearedEvent"])) !== null);
 ok("fixture pairing response parses", parseClaimResponse(response(namedValue(fixture,
    ["pairingClaim", "claim", "claimResponse", "pairingResponse"]))) !== null);

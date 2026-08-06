@@ -1,6 +1,7 @@
 import * as http from "node:http";
 import { EventEmitter } from "node:events";
 import { DashboardClient } from "../dashboard-client";
+import { parseBumpResponse } from "../contracts";
 
 let pass = 0;
 let fail = 0;
@@ -35,6 +36,9 @@ void (async () => {
       if (route === "/ok") {
         response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         response.end('{"ok":true}');
+      } else if (route === "/bump") {
+        response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        response.end('{"scanId":"scan-1","at":1754000005000,"by":"Fixture Bumper","holdMs":180000,"count":1}');
       } else if (route === "/vendor") {
         response.writeHead(200, { "Content-Type": "application/problem+json" });
         response.end('{"ok":true}');
@@ -83,6 +87,9 @@ void (async () => {
 
     const vendor = await client.requestJson({ url: new URL("/vendor", base), method: "GET", parse: objectWithOk });
     ok("structured JSON content types are accepted", vendor.ok);
+
+    const bump = await client.requestJson({ url: new URL("/bump", base), method: "POST", parse: parseBumpResponse });
+    ok("dashboard bump event response is accepted", bump.ok && bump.body.scanId === "scan-1");
 
     const httpFailure = await client.requestJson({ url: new URL("/http-error", base), method: "GET", parse: objectWithOk });
     ok("HTTP failures retain bounded JSON error bodies", !httpFailure.ok && httpFailure.kind === "http" &&

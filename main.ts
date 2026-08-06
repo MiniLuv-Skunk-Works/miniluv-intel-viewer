@@ -23,7 +23,7 @@ import { runAuthorizedIpc } from "./ipc-security";
 import {
   parseBumpClearedEvent,
   parseBumpEvent,
-  parseBumpResult,
+  parseBumpResponse,
   parseClaimResponse,
   parseClipboardRelayResponse,
   parseClipWatchRequest,
@@ -565,12 +565,12 @@ handleIpc("bump", () => ({ ok: false, error: "Request rejected." }), async (_eve
     method: "POST",
     token,
     body: { scanId },
-    parse: parseBumpResult,
+    parse: parseBumpResponse,
     maxResponseBytes: SMALL_RESPONSE_LIMIT,
   });
   // The timer itself arrives over the feed, not from this response, so the
   // bumper sees exactly what everyone else sees at the same time.
-  if (result.ok) return result.body;
+  if (result.ok) return { ok: true };
 
   const failure = parseServerError(result.body);
   // A 404 has two very different causes and they need different advice.

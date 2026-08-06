@@ -378,6 +378,13 @@ export function parseBumpEvent(value: unknown): BumpEvent | null {
     : { scanId, by, count, holdMs, remainingMs };
 }
 
+// The dashboard returns the created bump event from POST /api/viewer/bump.
+// Keep that wire response distinct from BumpResult, which is the viewer's
+// renderer-facing IPC acknowledgement.
+export function parseBumpResponse(value: unknown): BumpEvent | null {
+  return parseBumpEvent(value);
+}
+
 export function parseBumpClearedEvent(value: unknown): BumpClearedEvent | null {
   const source = plainRecord(value);
   const scanId = source ? boundedString(source.scanId, VALIDATION_LIMITS.id, 1) : null;
