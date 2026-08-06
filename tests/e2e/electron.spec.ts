@@ -61,6 +61,26 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     await expect(page.locator(".hull").first()).toHaveText(hostile);
     await expect(page.locator("img[src='x']")).toHaveCount(0);
     expect(await page.evaluate(() => document.body.dataset.pwned)).toBeUndefined();
+    await expect(page.locator("#status")).toContainText("last event");
+
+    await page.locator("#filterBtn").click();
+    await page.locator("#filterQuery").fill("Providence");
+    await expect(page.locator("#list")).toContainText("No scans match");
+    await page.locator("#filterClear").click();
+    await expect(page.locator(".hull").first()).toHaveText(hostile);
+
+    await page.locator("#settingsBtn").click();
+    await page.locator("#alertsEnabled").check();
+    await page.locator("#alertHulls").fill("Obelisk");
+    await page.locator("#settingsSave").click();
+    await expect(page.locator("#settings")).not.toHaveClass(/show/);
+    await page.locator("#muteBtn").click();
+    await expect(page.locator("#muteBtn")).toHaveAttribute("aria-pressed", "true");
+
+    await page.locator("#diagBtn").click();
+    await expect(page.locator("#diagOrigin")).toHaveText(dashboard.url);
+    await expect(page.locator("#diagVersion")).not.toHaveText("—");
+    await page.locator("#diagnosticsClose").click();
 
     dashboard.disconnectFeeds();
     await dashboard.waitForFeedCount(1);
@@ -109,6 +129,7 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     );
     expect(restoredBounds).toEqual(savedBounds);
     await expect(page.locator("#pair")).not.toHaveClass(/show/);
+    await expect(page.locator("#muteBtn")).toHaveAttribute("aria-pressed", "true");
     await page.locator("#repairBtn").click();
     await expect(page.locator("#pair")).toHaveClass(/show/);
     await expect(page.locator("#pairCancel")).toBeHidden();

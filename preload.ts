@@ -8,10 +8,15 @@ import {
   parseBumpResult,
   parseClipboardResult,
   parseConnectionStatus,
+  parseDiagnosticsSnapshot,
   parseOpacity,
   parsePairResult,
   parseScan,
   parseViewerState,
+  parseUpdateInfo,
+  parseUserNotice,
+  parseUserPreferences,
+  defaultUserPreferences,
   type IpcEventContract,
   type IpcInvokeContract,
   type ViewerApi,
@@ -59,6 +64,26 @@ const api: ViewerApi = {
       stats: { sent: 0, ignored: 0, lastKind: null, lastAt: 0 },
       error: "Invalid clipboard response.",
     },
+  preferences: async () =>
+    parseUserPreferences(await invokeUnknown("preferences", undefined)) ?? defaultUserPreferences(),
+  savePreferences: async (preferences) =>
+    parseUserPreferences(await invokeUnknown("savePreferences", preferences)) ??
+    defaultUserPreferences(),
+  diagnostics: async () =>
+    parseDiagnosticsSnapshot(await invokeUnknown("diagnostics", undefined)) ?? {
+      appVersion: "unknown",
+      serverOrigin: "",
+      connection: { state: "offline" },
+      errors: [],
+      update: { status: "unknown", currentVersion: "unknown" },
+    },
+  checkUpdate: async () =>
+    parseUpdateInfo(await invokeUnknown("checkUpdate", undefined)) ?? {
+      status: "error",
+      currentVersion: "unknown",
+      error: "Invalid update response.",
+    },
+  openUpdate: async () => (await invokeUnknown("openUpdate", undefined)) === true,
   quit: async () => {
     await invokeUnknown("close", undefined);
   },
@@ -90,6 +115,16 @@ const api: ViewerApi = {
       if (result) listener(result);
     }),
   onUnpaired: (listener) => onIpc("unpaired", listener),
+  onNotice: (listener) =>
+    onIpc("notice", (value) => {
+      const notice = parseUserNotice(value);
+      if (notice) listener(notice);
+    }),
+  onUpdate: (listener) =>
+    onIpc("update", (value) => {
+      const update = parseUpdateInfo(value);
+      if (update) listener(update);
+    }),
 };
 
 contextBridge.exposeInMainWorld("milf", api);

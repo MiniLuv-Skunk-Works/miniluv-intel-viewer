@@ -1,5 +1,6 @@
 import { URL } from "node:url";
 import type { ClipboardWatcher, ClipboardWatcherCallbacks } from "./clipboard-watcher";
+import type { AlertService } from "./alerting";
 import {
   PROTOCOL_CAPABILITIES,
   negotiateProtocol,
@@ -16,6 +17,8 @@ import {
   type ClipboardCapture,
   type ClipboardResult,
   type ConnectionStatus,
+  defaultUserPreferences,
+  type DiagnosticsSnapshot,
   type IpcEventContract,
   type KnownCapability,
   type OpacityLevel,
@@ -23,6 +26,8 @@ import {
   type PairResult,
   type ProtocolNegotiation,
   type ViewerState,
+  type UserPreferences,
+  type UpdateInfo,
   type Vocabulary,
 } from "./contracts";
 import type { CredentialStore } from "./credentials";
@@ -31,10 +36,13 @@ import { parseDashboardOrigin, type DashboardOriginResult } from "./dashboard-ur
 import {
   FeedConnectionManager,
   type FeedConnectionCallbacks,
+  type FeedConnectionStatus,
   type FeedSession,
   type SseMessage,
 } from "./feed-connection";
 import type { AtomicJsonFile, SettingsStore } from "./settings-store";
+import type { DiagnosticsRecorder } from "./diagnostics";
+import type { UpdateChecker } from "./update-checker";
 
 const SMALL_RESPONSE_LIMIT = 64 * 1024;
 const VOCABULARY_RESPONSE_LIMIT = 16 * 1024 * 1024;
@@ -60,6 +68,10 @@ export interface ViewerControllerOptions {
   relay: ViewerRelay;
   createFeedConnection?: (callbacks: FeedConnectionCallbacks) => FeedConnectionLike;
   createClipboardWatcher: (callbacks: ClipboardWatcherCallbacks) => ClipboardWatcher;
+  alertService: AlertService;
+  diagnostics: DiagnosticsRecorder;
+  updateChecker: UpdateChecker;
+  appVersion: string;
 }
 
 export class ViewerController {
@@ -71,9 +83,16 @@ export class ViewerController {
   private readonly relay: ViewerRelay;
   private readonly feedConnection: FeedConnectionLike;
   private readonly clipboardWatcher: ClipboardWatcher;
+  private readonly alertService: AlertService;
+  private readonly diagnosticsRecorder: DiagnosticsRecorder;
+  private readonly updateChecker: UpdateChecker;
+  private readonly appVersion: string;
   private protocol: ProtocolNegotiation | null = null;
   private startupPairingDetail: string | null = null;
   private networkGeneration = 0;
+  private lastEventAt: number | undefined;
+  private connectionStatus: ConnectionStatus = { state: "unpaired" };
+  private replayTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: ViewerControllerOptions) {
     this.settingsStore = options.settingsStore;
@@ -82,10 +101,14 @@ export class ViewerController {
     this.dashboardClient = options.dashboardClient ?? new DashboardClient();
     this.allowInsecureLocalhost = options.allowInsecureLocalhost;
     this.relay = options.relay;
+    this.alertService = options.alertService;
+    this.diagnosticsRecorder = options.diagnostics;
+    this.updateChecker = options.updateChecker;
+    this.appVersion = options.appVersion;
     this.feedConnection = (
       options.createFeedConnection ?? ((callbacks) => new FeedConnectionManager(callbacks))
     )({
-      onStatus: (status) => this.relay("status", status),
+      onStatus: (status) => this.handleFeedStatus(status),
       onEvent: (message) => this.handleEvent(message),
       onUnauthorized: () => {
         void this.expirePairing();
@@ -106,6 +129,7 @@ export class ViewerController {
 
   async initialize(): Promise<void> {
     const settings = await this.settingsStore.initialize();
+    this.alertService.configure(settings.preferences?.alerts ?? defaultUserPreferences().alerts);
     const initialized = await this.credentials.initialize(settings.token);
     if (initialized.removeLegacyToken) await this.settingsStore.saveNow({}, ["token"]);
 
@@ -140,6 +164,7 @@ export class ViewerController {
     this.connect();
     this.fetchVocabulary();
     if (this.clipboardWatching()) this.clipboardWatcher.start();
+    void this.updateChecker.check(false);
   }
 
   async pair(request: PairRequest): Promise<PairResult> {
@@ -177,7 +202,7 @@ export class ViewerController {
     await this.credentials.clear();
     await this.settingsStore.saveNow({}, ["token"]);
     this.relay("unpaired", undefined);
-    this.relay("status", { state: "unpaired" });
+    this.emitStatus({ state: "unpaired" });
     return true;
   }
 
@@ -188,6 +213,41 @@ export class ViewerController {
       serverUrl: settings.serverUrl || "",
       opacity: settings.opacity ?? 1,
     };
+  }
+
+  preferences(): UserPreferences {
+    const stored = this.settingsStore.get().preferences;
+    return stored
+      ? {
+          alerts: {
+            ...stored.alerts,
+            hulls: [...stored.alerts.hulls],
+            systems: [...stored.alerts.systems],
+            routes: [...stored.alerts.routes],
+            quietHours: { ...stored.alerts.quietHours },
+          },
+          filters: { ...stored.filters },
+        }
+      : defaultUserPreferences();
+  }
+
+  savePreferences(preferences: UserPreferences): UserPreferences {
+    this.settingsStore.scheduleSave({ preferences });
+    this.alertService.configure(preferences.alerts);
+    return this.preferences();
+  }
+
+  diagnostics(): DiagnosticsSnapshot {
+    const parsed = this.storedOrigin(this.settingsStore.get().serverUrl);
+    return this.diagnosticsRecorder.snapshot(
+      this.appVersion,
+      parsed.ok ? parsed.origin : "",
+      this.updateChecker.cachedInfo(),
+    );
+  }
+
+  checkUpdate(): Promise<UpdateInfo> {
+    return this.updateChecker.check(true);
   }
 
   setOpacity(level: OpacityLevel): OpacityLevel {
@@ -265,6 +325,8 @@ export class ViewerController {
   }
 
   async shutdown(): Promise<void> {
+    if (this.replayTimer) clearTimeout(this.replayTimer);
+    this.updateChecker.cancel();
     this.networkGeneration += 1;
     this.dashboardClient.cancelAll();
     this.feedConnection.stop();
@@ -291,8 +353,7 @@ export class ViewerController {
   private connect(): void {
     const auth = this.session();
     if (!auth) {
-      this.relay(
-        "status",
+      this.emitStatus(
         this.startupPairingDetail
           ? { state: "unpaired", detail: this.startupPairingDetail }
           : { state: "unpaired" },
@@ -302,8 +363,71 @@ export class ViewerController {
     this.feedConnection.start(auth);
   }
 
+  private emitStatus(status: ConnectionStatus): void {
+    const merged = {
+      ...status,
+      ...(this.lastEventAt === undefined ? {} : { lastEventAt: this.lastEventAt }),
+    };
+    this.connectionStatus = merged;
+    this.diagnosticsRecorder.setConnection(merged);
+    this.relay("status", merged);
+  }
+
+  private handleFeedStatus(status: FeedConnectionStatus): void {
+    if (status.state === "connecting") {
+      this.alertService.setArmed(false);
+      this.clearReplayTimer();
+      this.emitStatus({ state: "connecting" });
+      return;
+    }
+    if (status.state === "live") {
+      this.emitStatus({ state: "live" });
+      this.scheduleReplaySettled(false);
+      return;
+    }
+    if (status.state === "stale") {
+      this.emitStatus({ state: "stale", detail: "No feed activity for 30 seconds" });
+      return;
+    }
+    this.alertService.setArmed(false);
+    this.clearReplayTimer();
+    const detail = "detail" in status ? status.detail : "feed unavailable";
+    if (/timed out|timeout/i.test(detail)) this.diagnosticsRecorder.record("feed-timeout");
+    else if (/invalid|non-SSE|exceeded/i.test(detail))
+      this.diagnosticsRecorder.record("feed-invalid");
+    else this.diagnosticsRecorder.record("feed-unreachable");
+    this.emitStatus({
+      state: "offline",
+      detail: status.state === "reconnecting" ? `Retrying in ${detail}` : detail,
+    });
+  }
+
+  private clearReplayTimer(): void {
+    if (this.replayTimer) clearTimeout(this.replayTimer);
+    this.replayTimer = null;
+  }
+
+  private scheduleReplaySettled(showReplaying: boolean): void {
+    this.clearReplayTimer();
+    this.alertService.setArmed(false);
+    if (showReplaying) this.emitStatus({ state: "replaying", detail: "Restoring retained scans" });
+    this.replayTimer = setTimeout(() => {
+      this.replayTimer = null;
+      this.alertService.setArmed(true);
+      this.emitStatus({ state: "live" });
+    }, 1_000);
+  }
+
+  private acceptedEvent(): void {
+    this.lastEventAt = Date.now();
+    this.emitStatus(this.connectionStatus);
+  }
+
   private replaceNetworkSession(): void {
     this.networkGeneration += 1;
+    this.lastEventAt = undefined;
+    this.alertService.setArmed(false);
+    this.clearReplayTimer();
     this.dashboardClient.cancelAll();
     this.feedConnection.stop();
   }
@@ -397,18 +521,23 @@ export class ViewerController {
     if (event === "scan") {
       const scan = parseScan(parsed);
       if (!scan || (id !== undefined && id !== scan.id)) return false;
+      this.acceptedEvent();
       this.relay("scan", scan);
+      if (this.connectionStatus.state === "replaying") this.scheduleReplaySettled(true);
+      else this.alertService.handle(scan);
       return true;
     }
     if (event === "bump") {
       const bump = parseBumpEvent(parsed);
       if (!bump) return false;
+      this.acceptedEvent();
       this.relay("bump", bump);
       return true;
     }
     if (event === "bumpCleared") {
       const cleared = parseBumpClearedEvent(parsed);
       if (!cleared) return false;
+      this.acceptedEvent();
       this.relay("bumpCleared", cleared);
       return true;
     }
@@ -416,6 +545,7 @@ export class ViewerController {
 
     const hello = parseHelloEvent(parsed);
     if (!hello) return false;
+    this.acceptedEvent();
     this.protocol = negotiateProtocol(hello);
     const replaySupported =
       this.protocol.compatibility !== "legacy" &&
@@ -437,10 +567,13 @@ export class ViewerController {
     }
     const status = this.protocolStatus(hello.name, this.protocol);
     if (replaySupported && hello.replay?.status === "cursor-expired") {
-      status.state = "warn";
-      status.detail = "Replay history expired - showing retained scans";
+      this.relay("notice", {
+        level: "warn",
+        message: "Replay history expired - showing retained scans",
+      });
     }
-    this.relay("status", status);
+    this.emitStatus(status);
+    if (hello.replay) this.scheduleReplaySettled(true);
     return true;
   }
 
@@ -456,15 +589,20 @@ export class ViewerController {
       };
     }
     if (negotiated.compatibility === "legacy") {
+      this.relay("notice", { level: "warn", message: "Legacy dashboard - compatibility mode" });
       return {
-        state: "warn",
+        state: "live",
         detail: "Legacy dashboard - compatibility mode",
         compatibility: negotiated.compatibility,
       };
     }
     if (negotiated.compatibility === "newer-protocol") {
+      this.relay("notice", {
+        level: "warn",
+        message: `Dashboard protocol v${negotiated.protocolVersion} is newer - scan feed only`,
+      });
       return {
-        state: "warn",
+        state: "live",
         detail: `Dashboard protocol v${negotiated.protocolVersion} is newer - scan feed only`,
         compatibility: negotiated.compatibility,
         ...(negotiated.protocolVersion === undefined
@@ -479,12 +617,14 @@ export class ViewerController {
       "clipboard-vocabulary": "clipboard vocabulary",
       "scan-replay": "scan replay",
     };
+    const detail =
+      "Limited dashboard - " +
+      negotiated.missingCapabilities.map((capability) => labels[capability]).join(", ") +
+      " unavailable";
+    this.relay("notice", { level: "warn", message: detail });
     return {
-      state: "warn",
-      detail:
-        "Limited dashboard - " +
-        negotiated.missingCapabilities.map((capability) => labels[capability]).join(", ") +
-        " unavailable",
+      state: "live",
+      detail,
       compatibility: negotiated.compatibility,
       ...(negotiated.protocolVersion === undefined
         ? {}
@@ -497,6 +637,6 @@ export class ViewerController {
     this.dashboardClient.cancelAll();
     this.protocol = null;
     await this.credentials.clear();
-    this.relay("status", { state: "unpaired", detail: "pairing expired - pair again" });
+    this.emitStatus({ state: "unpaired", detail: "pairing expired - pair again" });
   }
 }

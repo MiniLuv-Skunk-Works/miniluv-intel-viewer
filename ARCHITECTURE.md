@@ -101,6 +101,33 @@ pairings requests the dashboard's normal retained snapshot. The feed connection
 module owns the only active request, retry timer, generation, idle timeout, and
 jittered backoff so stale callbacks cannot reconnect an old pairing.
 
+The visible connection phase distinguishes connecting, replaying, live, stale,
+and offline. Thirty seconds without stream bytes marks the feed stale; the
+existing sixty-second idle boundary closes it and starts bounded retry. The
+last-event timestamp advances only for successfully parsed hello, scan, bump,
+or bump-clear events. Replay alerting stays disarmed until one second passes
+without another retained scan.
+
+## User preferences, notifications, and updates
+
+Alert and filter preferences are non-secret settings validated on disk and at
+the IPC boundary. The sandboxed renderer may edit those preferences, but the
+main process evaluates alert rules and owns Electron's native notification API.
+Alert matching uses `valueSplit`; configured alert categories use OR semantics,
+while the compact text/minimum-value feed filters use AND semantics and never
+affect alert evaluation.
+
+Diagnostics expose only app version, validated dashboard origin, connection
+metadata, last-event time, and ten fixed redacted error descriptions. They do
+not include credentials, scan payloads, server response bodies, query strings,
+or filesystem paths.
+
+The update checker makes a bounded HTTPS request to GitHub's latest stable
+release endpoint no more than once per day unless the user requests a check.
+Release metadata is strictly parsed and cached atomically. The renderer receives
+plain text only; opening the release uses a main-process allowlist for this
+repository. No artifact is downloaded or executed by the viewer.
+
 ## Compatibility rules
 
 - A hello event without `protocolVersion` or `capabilities` is legacy. Existing

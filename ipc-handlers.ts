@@ -5,6 +5,8 @@ import {
   parseOpacity,
   parsePairRequest,
   parseScanId,
+  parseUserPreferences,
+  defaultUserPreferences,
   type BumpResult,
   type ClipboardResult,
   type IpcInvokeContract,
@@ -12,6 +14,9 @@ import {
   type PairRequest,
   type PairResult,
   type ViewerState,
+  type DiagnosticsSnapshot,
+  type UpdateInfo,
+  type UserPreferences,
 } from "./contracts";
 import { runAuthorizedIpc } from "./ipc-security";
 
@@ -22,6 +27,11 @@ export interface ViewerActions {
   setOpacity(level: OpacityLevel): OpacityLevel;
   bump(scanId: string): Promise<BumpResult>;
   clipboard(on: boolean | undefined): ClipboardResult;
+  preferences(): UserPreferences;
+  savePreferences(preferences: UserPreferences): UserPreferences;
+  diagnostics(): DiagnosticsSnapshot;
+  checkUpdate(): Promise<UpdateInfo>;
+  openUpdate(): Promise<boolean>;
 }
 
 export interface RegisterIpcHandlersOptions {
@@ -107,6 +117,60 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => 
         ? { ...options.actions.clipboard(undefined), error: "invalid clipboard setting" }
         : options.actions.clipboard(on);
     },
+  );
+
+  handle(
+    "preferences",
+    () => defaultUserPreferences(),
+    (_event, input) =>
+      parseNoArguments(input) ? options.actions.preferences() : defaultUserPreferences(),
+  );
+
+  handle(
+    "savePreferences",
+    () => defaultUserPreferences(),
+    (_event, input) => {
+      const preferences = parseUserPreferences(input);
+      return preferences
+        ? options.actions.savePreferences(preferences)
+        : options.actions.preferences();
+    },
+  );
+
+  handle(
+    "diagnostics",
+    () => ({
+      appVersion: "unknown",
+      serverOrigin: "",
+      connection: { state: "offline" },
+      errors: [],
+      update: { status: "unknown", currentVersion: "unknown" },
+    }),
+    (_event, input) =>
+      parseNoArguments(input)
+        ? options.actions.diagnostics()
+        : {
+            appVersion: "unknown",
+            serverOrigin: "",
+            connection: { state: "offline" },
+            errors: [],
+            update: { status: "unknown", currentVersion: "unknown" },
+          },
+  );
+
+  handle(
+    "checkUpdate",
+    () => ({ status: "error", currentVersion: "unknown", error: "Request rejected." }),
+    (_event, input) =>
+      parseNoArguments(input)
+        ? options.actions.checkUpdate()
+        : { status: "error", currentVersion: "unknown", error: "Invalid update request." },
+  );
+
+  handle(
+    "openUpdate",
+    () => false,
+    (_event, input) => (parseNoArguments(input) ? options.actions.openUpdate() : false),
   );
 
   handle(

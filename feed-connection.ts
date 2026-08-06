@@ -13,7 +13,7 @@ export interface SseMessage {
 }
 
 export type FeedConnectionStatus =
-  | { state: "connecting" | "live" }
+  | { state: "connecting" | "live" | "stale" }
   | { state: "reconnecting" | "offline" | "error"; detail: string };
 
 export interface FeedConnectionCallbacks {
@@ -33,6 +33,7 @@ export interface FeedConnectionOptions extends FeedConnectionCallbacks {
   connectionTimeoutMs?: number;
   responseTimeoutMs?: number;
   idleTimeoutMs?: number;
+  staleTimeoutMs?: number;
   maxFrameBytes?: number;
   minimumRetryMs?: number;
   maximumRetryMs?: number;
@@ -45,6 +46,7 @@ export interface FeedConnectionOptions extends FeedConnectionCallbacks {
 const DEFAULT_CONNECTION_TIMEOUT_MS = 10_000;
 const DEFAULT_RESPONSE_TIMEOUT_MS = 20_000;
 const DEFAULT_IDLE_TIMEOUT_MS = 60_000;
+const DEFAULT_STALE_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_FRAME_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MINIMUM_RETRY_MS = 1_000;
 const DEFAULT_MAXIMUM_RETRY_MS = 30_000;
@@ -133,6 +135,7 @@ export class FeedConnectionManager {
   private readonly connectionTimeoutMs: number;
   private readonly responseTimeoutMs: number;
   private readonly idleTimeoutMs: number;
+  private readonly staleTimeoutMs: number;
   private readonly maxFrameBytes: number;
   private readonly minimumRetryMs: number;
   private readonly maximumRetryMs: number;
@@ -149,6 +152,7 @@ export class FeedConnectionManager {
   private connectionTimer: Timer | null = null;
   private responseTimer: Timer | null = null;
   private idleTimer: Timer | null = null;
+  private staleTimer: Timer | null = null;
   private retryMs: number;
   private replayEnabled = false;
   private lastEventId: string | null = null;
@@ -160,6 +164,7 @@ export class FeedConnectionManager {
     this.connectionTimeoutMs = options.connectionTimeoutMs ?? DEFAULT_CONNECTION_TIMEOUT_MS;
     this.responseTimeoutMs = options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS;
     this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+    this.staleTimeoutMs = options.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS;
     this.maxFrameBytes = options.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES;
     this.minimumRetryMs = options.minimumRetryMs ?? DEFAULT_MINIMUM_RETRY_MS;
     this.maximumRetryMs = options.maximumRetryMs ?? DEFAULT_MAXIMUM_RETRY_MS;
@@ -206,6 +211,7 @@ export class FeedConnectionManager {
     const target = new URL("/api/feed", session.serverUrl);
     const parser = new SseParser(this.maxFrameBytes);
     let active = false;
+    let stale = false;
     this.callbacks.onStatus({ state: "connecting" });
 
     const armResponseTimer = (): void => {
@@ -263,14 +269,23 @@ export class FeedConnectionManager {
 
           this.callbacks.onStatus({ state: "live" });
           res.setEncoding("utf8");
-          this.armIdleTimer(generation);
+          const armActivityTimers = (): void => {
+            if (stale) {
+              stale = false;
+              this.callbacks.onStatus({ state: "live" });
+            }
+            this.armIdleTimer(generation, () => {
+              stale = true;
+            });
+          };
+          armActivityTimers();
           res.on("data", (chunk: string) => {
             if (!this.current(generation) || res !== this.response) return;
             if (!active) {
               active = true;
               this.retryMs = this.minimumRetryMs;
             }
-            this.armIdleTimer(generation);
+            armActivityTimers();
             try {
               for (const message of parser.push(chunk)) {
                 if (
@@ -348,8 +363,14 @@ export class FeedConnectionManager {
     });
   }
 
-  private armIdleTimer(generation: number): void {
+  private armIdleTimer(generation: number, onStale: () => void): void {
+    if (this.staleTimer) this.clearTimer(this.staleTimer);
     if (this.idleTimer) this.clearTimer(this.idleTimer);
+    this.staleTimer = this.setTimer(() => {
+      if (!this.current(generation)) return;
+      onStale();
+      this.callbacks.onStatus({ state: "stale" });
+    }, this.staleTimeoutMs);
     this.idleTimer = this.setTimer(() => {
       if (!this.current(generation)) return;
       this.callbacks.onStatus({ state: "offline", detail: "feed idle timeout" });
@@ -378,7 +399,9 @@ export class FeedConnectionManager {
     this.clearConnectionTimer();
     this.clearResponseTimer();
     if (this.idleTimer) this.clearTimer(this.idleTimer);
+    if (this.staleTimer) this.clearTimer(this.staleTimer);
     this.idleTimer = null;
+    this.staleTimer = null;
     const response = this.response;
     const request = this.request;
     this.response = null;

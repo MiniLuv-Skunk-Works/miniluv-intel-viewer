@@ -1,11 +1,16 @@
-import type {
-  ActiveBump,
-  ConnectionState,
-  ConnectionStatus,
-  OpacityLevel,
-  Scan,
-  ViewerApi,
+import {
+  defaultUserPreferences,
+  type ActiveBump,
+  type ConnectionState,
+  type ConnectionStatus,
+  type DiagnosticsSnapshot,
+  type OpacityLevel,
+  type Scan,
+  type ViewerApi,
+  type UserPreferences,
+  type UpdateInfo,
 } from "../contracts";
+import { scanMatchesFilter } from "../alerting";
 
 export interface RendererRuntime {
   dateNow(): number;
@@ -38,14 +43,49 @@ interface Elements {
   repairBtn: HTMLButtonElement;
   clipBtn: HTMLButtonElement;
   clearBtn: HTMLButtonElement;
+  filterBtn: HTMLButtonElement;
+  muteBtn: HTMLButtonElement;
+  settingsBtn: HTMLButtonElement;
+  diagBtn: HTMLButtonElement;
+  filterClear: HTMLButtonElement;
+  settingsClose: HTMLButtonElement;
+  diagnosticsClose: HTMLButtonElement;
+  settingsSave: HTMLButtonElement;
+  checkUpdateBtn: HTMLButtonElement;
+  openUpdateBtn: HTMLButtonElement;
   detailTitle: HTMLElement;
   detailBody: HTMLElement;
   detail: HTMLElement;
   list: HTMLElement;
   dot: HTMLElement;
   status: HTMLElement;
+  liveStatus: HTMLElement;
+  statusRow: HTMLElement;
   pair: HTMLElement;
   pairErr: HTMLElement;
+  filterPanel: HTMLElement;
+  filterQuery: HTMLInputElement;
+  filterValue: HTMLInputElement;
+  settings: HTMLElement;
+  settingsForm: HTMLFormElement;
+  settingsErr: HTMLElement;
+  alertsEnabled: HTMLInputElement;
+  alertValue: HTMLInputElement;
+  alertHulls: HTMLInputElement;
+  alertSystems: HTMLInputElement;
+  alertRoutes: HTMLInputElement;
+  sensitiveAlerts: HTMLInputElement;
+  quietEnabled: HTMLInputElement;
+  quietStart: HTMLInputElement;
+  quietEnd: HTMLInputElement;
+  diagnostics: HTMLElement;
+  diagVersion: HTMLElement;
+  diagOrigin: HTMLElement;
+  diagState: HTMLElement;
+  diagLastEvent: HTMLElement;
+  diagnosticErrors: HTMLElement;
+  updateSummary: HTMLElement;
+  releaseNotes: HTMLElement;
 }
 
 interface ScanElements {
@@ -57,7 +97,7 @@ interface ScanElements {
   bumpWho: HTMLElement;
 }
 
-type Overlay = "detail" | "pair" | null;
+type Overlay = "detail" | "pair" | "settings" | "diagnostics" | null;
 
 export function startRenderer(
   api: ViewerApi,
@@ -100,6 +140,11 @@ export function startRenderer(
   let protocolNotice: ConnectionStatus | null = null;
   let clipMsgTimer: number | null = null;
   let bumpErrTimer: number | null = null;
+  let noticeTimer: number | null = null;
+  let preferences: UserPreferences = defaultUserPreferences();
+  let currentStatus: ConnectionStatus = { state: "connecting" };
+  let currentUpdate: UpdateInfo = { status: "unknown", currentVersion: "unknown" };
+  let visibleNotice: string | null = null;
 
   function isk(n: number | null | undefined): string | null {
     if (n == null || isNaN(n)) return null;
@@ -257,6 +302,8 @@ export function startRenderer(
       return;
     }
     if (activeOverlay === "detail") closeDetail(false);
+    if (activeOverlay === "settings") closeSettings(false);
+    if (activeOverlay === "diagnostics") closeDiagnostics(false);
     pairDismissible = dismissible;
     const activeElement = doc.activeElement;
     pairReturnFocus =
@@ -270,6 +317,118 @@ export function startRenderer(
     $("pair").classList.add("show");
     $("pair").removeAttribute("aria-hidden");
     $("server").focus();
+  }
+
+  function closeSettings(restoreFocus = true): void {
+    if (activeOverlay !== "settings") return;
+    $("settings").classList.remove("show");
+    $("settings").setAttribute("aria-hidden", "true");
+    activeOverlay = null;
+    setShellInert(false);
+    if (restoreFocus) $("settingsBtn").focus();
+  }
+
+  function minutesText(minutes: number): string {
+    return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  }
+
+  function inputMinutes(value: string): number | null {
+    const match = /^(\d\d):(\d\d)$/.exec(value);
+    if (!match) return null;
+    const minutes = Number(match[1]) * 60 + Number(match[2]);
+    return minutes >= 0 && minutes < 1_440 ? minutes : null;
+  }
+
+  function preferenceList(value: string): string[] {
+    const seen = new Set<string>();
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => {
+        const key = item.toLocaleLowerCase();
+        if (!item || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+
+  function fillSettings(): void {
+    const alerts = preferences.alerts;
+    $("alertsEnabled").checked = alerts.enabled;
+    $("alertValue").value =
+      alerts.minimumSplitValue === null ? "" : String(alerts.minimumSplitValue);
+    $("alertHulls").value = alerts.hulls.join(", ");
+    $("alertSystems").value = alerts.systems.join(", ");
+    $("alertRoutes").value = alerts.routes.join(", ");
+    $("sensitiveAlerts").checked = alerts.includeSensitiveDetails;
+    $("quietEnabled").checked = alerts.quietHours.enabled;
+    $("quietStart").value = minutesText(alerts.quietHours.startMinute);
+    $("quietEnd").value = minutesText(alerts.quietHours.endMinute);
+    $("settingsErr").textContent = "";
+  }
+
+  function openSettings(): void {
+    if (activeOverlay === "detail") closeDetail(false);
+    if (activeOverlay === "diagnostics") closeDiagnostics(false);
+    fillSettings();
+    activeOverlay = "settings";
+    setShellInert(true);
+    $("settings").classList.add("show");
+    $("settings").removeAttribute("aria-hidden");
+    $("settingsClose").focus();
+  }
+
+  function renderUpdate(update: UpdateInfo): void {
+    currentUpdate = update;
+    const summary = {
+      unknown: `Current version ${update.currentVersion}.`,
+      checking: "Checking for a stable release…",
+      "up-to-date": `Up to date (${update.currentVersion}).`,
+      available: `Version ${update.latestVersion ?? "unknown"} is available.`,
+      error: update.error || "The release check failed.",
+    }[update.status];
+    $("updateSummary").textContent = summary;
+    $("releaseNotes").textContent = update.notes || "";
+    $("releaseNotes").hidden = !update.notes;
+    $("openUpdateBtn").hidden = update.status !== "available" || !update.releaseUrl;
+    $("checkUpdateBtn").disabled = update.status === "checking";
+  }
+
+  function renderDiagnostics(snapshot: DiagnosticsSnapshot): void {
+    $("diagVersion").textContent = snapshot.appVersion;
+    $("diagOrigin").textContent = snapshot.serverOrigin || "Not paired";
+    $("diagState").textContent = snapshot.connection.state;
+    $("diagLastEvent").textContent = snapshot.connection.lastEventAt
+      ? new Date(snapshot.connection.lastEventAt).toLocaleString()
+      : "Never";
+    const entries = snapshot.errors.length
+      ? snapshot.errors.map((error) =>
+          element("li", undefined, `${new Date(error.at).toLocaleTimeString()} — ${error.message}`),
+        )
+      : [element("li", undefined, "None")];
+    $("diagnosticErrors").replaceChildren(...entries);
+    renderUpdate(snapshot.update);
+  }
+
+  function closeDiagnostics(restoreFocus = true): void {
+    if (activeOverlay !== "diagnostics") return;
+    $("diagnostics").classList.remove("show");
+    $("diagnostics").setAttribute("aria-hidden", "true");
+    activeOverlay = null;
+    setShellInert(false);
+    if (restoreFocus) $("diagBtn").focus();
+  }
+
+  function openDiagnostics(): void {
+    if (activeOverlay === "detail") closeDetail(false);
+    if (activeOverlay === "settings") closeSettings(false);
+    activeOverlay = "diagnostics";
+    setShellInert(true);
+    $("diagnostics").classList.add("show");
+    $("diagnostics").removeAttribute("aria-hidden");
+    $("diagnosticsClose").focus();
+    void api.diagnostics().then(renderDiagnostics);
+    renderUpdate(currentUpdate);
   }
 
   const focusableSelector = [
@@ -289,14 +448,27 @@ export function startRenderer(
       if (activeOverlay === "detail") {
         event.preventDefault();
         closeDetail();
-      } else if (pairDismissible) {
+      } else if (activeOverlay === "pair" && pairDismissible) {
         event.preventDefault();
         closePair();
+      } else if (activeOverlay === "settings") {
+        event.preventDefault();
+        closeSettings();
+      } else if (activeOverlay === "diagnostics") {
+        event.preventDefault();
+        closeDiagnostics();
       }
       return;
     }
     if (event.key !== "Tab") return;
-    const root = activeOverlay === "detail" ? $("detail") : $("pair");
+    const root =
+      activeOverlay === "detail"
+        ? $("detail")
+        : activeOverlay === "settings"
+          ? $("settings")
+          : activeOverlay === "diagnostics"
+            ? $("diagnostics")
+            : $("pair");
     const focusable = focusableWithin(root);
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
@@ -403,8 +575,13 @@ export function startRenderer(
       list.replaceChildren(element("div", "empty", "Waiting for scans\u2026"));
       return;
     }
+    const visible = scans.filter((scan) => scanMatchesFilter(scan, preferences.filters));
+    if (!visible.length) {
+      list.replaceChildren(element("div", "empty", "No scans match the active filters."));
+      return;
+    }
     const fragment = doc.createDocumentFragment();
-    scans.forEach((scan) => fragment.append(createScan(scan)));
+    visible.forEach((scan) => fragment.append(createScan(scan)));
     list.replaceChildren(fragment);
     paintBumps();
     tick();
@@ -419,11 +596,36 @@ export function startRenderer(
           "age" + (age > 15 * 60e3 ? " dead" : age > 5 * 60e3 ? " stale" : "");
       });
     });
+    paintConnectionStatus();
   }
   every(tick, 1000);
 
+  function paintConnectionStatus(): void {
+    const age = currentStatus.lastEventAt
+      ? ` · last event ${ageText(runtime.dateNow() - currentStatus.lastEventAt)} ago`
+      : " · no events yet";
+    const label = {
+      live: "Live",
+      connecting: "Connecting…",
+      reconnecting: "Reconnecting",
+      replaying: "Replaying retained scans",
+      stale: "Stale",
+      offline: "Offline",
+      error: "Error",
+      unpaired: "Not paired",
+      clip: "Live",
+      warn: "Warning",
+    }[currentStatus.state];
+    $("status").textContent = visibleNotice
+      ? `${label} · ${visibleNotice}`
+      : label + age + (currentStatus.detail ? ` · ${currentStatus.detail}` : "");
+  }
+
   function setStatus(status: ConnectionStatus): void {
-    let shown = status;
+    let shown =
+      status.lastEventAt === undefined && currentStatus.lastEventAt !== undefined
+        ? { ...status, lastEventAt: currentStatus.lastEventAt }
+        : status;
     if (shown.compatibility) protocolNotice = shown.state === "warn" ? shown : null;
     else if (shown.state === "live" && protocolNotice) shown = protocolNotice;
     if (shown.state === "unpaired") protocolNotice = null;
@@ -431,6 +633,8 @@ export function startRenderer(
       live: "live",
       connecting: "warn",
       reconnecting: "warn",
+      replaying: "warn",
+      stale: "warn",
       offline: "bad",
       error: "bad",
       unpaired: "",
@@ -438,17 +642,21 @@ export function startRenderer(
       warn: "warn",
     };
     $("dot").className = "dot " + (map[shown.state] || "");
-    $("status").textContent = {
+    const announcement = {
       live: "Connected",
       connecting: "Connecting\u2026",
       reconnecting: "Connection lost \u2014 retrying in " + (shown.detail || "a moment"),
+      replaying: "Restoring retained scans",
+      stale: "Feed is stale",
       offline: "Can't reach the dashboard" + (shown.detail ? " (" + shown.detail + ")" : ""),
       error: shown.detail || "Error",
       unpaired: shown.detail || "Not paired",
       clip: shown.detail || "Clipboard scan sent",
       warn: shown.detail || "Warning",
     }[shown.state];
-    $("status").className = shown.state === "live" ? "status-visually-hidden" : "";
+    currentStatus = shown;
+    paintConnectionStatus();
+    $("liveStatus").textContent = announcement;
     if (shown.state === "unpaired") {
       paired = false;
       showPair(true, false);
@@ -507,6 +715,132 @@ export function startRenderer(
     });
   });
   api.onRepair(() => showPair(true, paired, $("repairBtn")));
+
+  function numericPreference(input: HTMLInputElement): number | null {
+    if (!input.value.trim()) return null;
+    const value = Number(input.value);
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  }
+
+  function saveFilters(): void {
+    preferences.filters = {
+      query: $("filterQuery").value.trim(),
+      minimumSplitValue: numericPreference($("filterValue")),
+    };
+    const active = !!preferences.filters.query || preferences.filters.minimumSplitValue !== null;
+    $("filterBtn").classList.toggle("armed", active);
+    render();
+    void api.savePreferences(preferences).then((saved) => {
+      preferences = saved;
+    });
+  }
+
+  $("filterBtn").addEventListener("click", () => {
+    const hidden = $("filterPanel").hidden;
+    $("filterPanel").hidden = !hidden;
+    $("filterBtn").setAttribute("aria-pressed", String(hidden));
+    if (hidden) $("filterQuery").focus();
+  });
+  $("filterQuery").addEventListener("input", saveFilters);
+  $("filterValue").addEventListener("input", saveFilters);
+  $("filterClear").addEventListener("click", () => {
+    $("filterQuery").value = "";
+    $("filterValue").value = "";
+    saveFilters();
+    $("filterQuery").focus();
+  });
+
+  function paintMute(): void {
+    const muted = preferences.alerts.muted;
+    $("muteBtn").classList.toggle("armed", muted);
+    $("muteBtn").setAttribute("aria-pressed", String(muted));
+    $("muteBtn").textContent = muted ? "unmute" : "mute";
+    $("muteBtn").setAttribute(
+      "aria-label",
+      muted ? "Unmute desktop alerts" : "Mute desktop alerts",
+    );
+  }
+
+  $("muteBtn").addEventListener("click", () => {
+    preferences.alerts.muted = !preferences.alerts.muted;
+    paintMute();
+    void api.savePreferences(preferences).then((saved) => {
+      preferences = saved;
+      paintMute();
+    });
+  });
+
+  $("settingsBtn").addEventListener("click", openSettings);
+  $("settingsClose").addEventListener("click", () => closeSettings());
+  $("settingsForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const startMinute = inputMinutes($("quietStart").value);
+    const endMinute = inputMinutes($("quietEnd").value);
+    const hulls = preferenceList($("alertHulls").value);
+    const systems = preferenceList($("alertSystems").value);
+    const routes = preferenceList($("alertRoutes").value);
+    const minimumSplitValue = numericPreference($("alertValue"));
+    if (startMinute === null || endMinute === null) {
+      $("settingsErr").textContent = "Enter valid quiet-hour times.";
+      return;
+    }
+    if ($("quietEnabled").checked && startMinute === endMinute) {
+      $("settingsErr").textContent = "Quiet-hour start and end must differ.";
+      return;
+    }
+    if (
+      $("alertsEnabled").checked &&
+      minimumSplitValue === null &&
+      !hulls.length &&
+      !systems.length &&
+      !routes.length
+    ) {
+      $("settingsErr").textContent = "Add at least one alert condition.";
+      return;
+    }
+    if ([hulls, systems, routes].some((list) => list.length > 50)) {
+      $("settingsErr").textContent = "Each alert list is limited to 50 names.";
+      return;
+    }
+    preferences.alerts = {
+      enabled: $("alertsEnabled").checked,
+      muted: preferences.alerts.muted,
+      includeSensitiveDetails: $("sensitiveAlerts").checked,
+      minimumSplitValue,
+      hulls,
+      systems,
+      routes,
+      quietHours: { enabled: $("quietEnabled").checked, startMinute, endMinute },
+    };
+    $("settingsSave").disabled = true;
+    void api.savePreferences(preferences).then((saved) => {
+      preferences = saved;
+      $("settingsSave").disabled = false;
+      paintMute();
+      closeSettings();
+    });
+  });
+
+  $("diagBtn").addEventListener("click", openDiagnostics);
+  $("diagnosticsClose").addEventListener("click", () => closeDiagnostics());
+  $("checkUpdateBtn").addEventListener("click", () => {
+    renderUpdate({ status: "checking", currentVersion: currentUpdate.currentVersion });
+    void api.checkUpdate().then(renderUpdate);
+  });
+  $("openUpdateBtn").addEventListener("click", () => {
+    void api.openUpdate();
+  });
+  api.onUpdate(renderUpdate);
+  api.onNotice((notice) => {
+    visibleNotice = notice.message;
+    paintConnectionStatus();
+    $("liveStatus").textContent = notice.message;
+    if (noticeTimer !== null) runtime.clearTimeout(noticeTimer);
+    noticeTimer = runtime.setTimeout(() => {
+      visibleNotice = null;
+      paintConnectionStatus();
+    }, 8_000);
+  });
 
   function setClipButton(on: boolean): void {
     $("clipBtn").classList.toggle("armed", on);
@@ -627,11 +961,22 @@ export function startRenderer(
     if (state.paired) closePair(false);
     else showPair(true, false);
   });
+  void api.preferences().then((saved) => {
+    preferences = saved;
+    $("filterQuery").value = saved.filters.query;
+    $("filterValue").value =
+      saved.filters.minimumSplitValue === null ? "" : String(saved.filters.minimumSplitValue);
+    const active = !!saved.filters.query || saved.filters.minimumSplitValue !== null;
+    $("filterBtn").classList.toggle("armed", active);
+    paintMute();
+    render();
+  });
 
   return () => {
     doc.removeEventListener("keydown", onDocumentKeydown);
     intervalIds.forEach((id) => runtime.clearInterval(id));
     if (clipMsgTimer !== null) runtime.clearTimeout(clipMsgTimer);
     if (bumpErrTimer !== null) runtime.clearTimeout(bumpErrTimer);
+    if (noticeTimer !== null) runtime.clearTimeout(noticeTimer);
   };
 }

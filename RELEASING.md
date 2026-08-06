@@ -112,6 +112,11 @@ Do not add automatic executable replacement until a future updater verifies
 signed metadata or an equivalent trusted release statement before installing
 an artifact.
 
+The viewer's release-awareness panel is not an updater: it checks only the
+latest stable GitHub release, renders bounded metadata as plain text, and opens
+the allowlisted release page after an explicit user action. It must continue to
+avoid downloading, executing, or replacing release artifacts.
+
 ## Failed release recovery
 
 Fix the underlying problem on a branch, merge the correction to `main`, and

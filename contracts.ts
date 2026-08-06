@@ -11,6 +11,60 @@ import {
 export type ClipboardKind = "fit" | "cargo";
 export type OpacityLevel = 0 | 1 | 2;
 
+export interface QuietHours {
+  enabled: boolean;
+  startMinute: number;
+  endMinute: number;
+}
+
+export interface AlertPreferences {
+  enabled: boolean;
+  muted: boolean;
+  includeSensitiveDetails: boolean;
+  minimumSplitValue: number | null;
+  hulls: string[];
+  systems: string[];
+  routes: string[];
+  quietHours: QuietHours;
+}
+
+export interface FilterPreferences {
+  query: string;
+  minimumSplitValue: number | null;
+}
+
+export interface UserPreferences {
+  alerts: AlertPreferences;
+  filters: FilterPreferences;
+}
+
+export const DEFAULT_USER_PREFERENCES: Readonly<UserPreferences> = Object.freeze({
+  alerts: Object.freeze({
+    enabled: false,
+    muted: false,
+    includeSensitiveDetails: false,
+    minimumSplitValue: null,
+    hulls: Object.freeze([]) as unknown as string[],
+    systems: Object.freeze([]) as unknown as string[],
+    routes: Object.freeze([]) as unknown as string[],
+    quietHours: Object.freeze({ enabled: false, startMinute: 22 * 60, endMinute: 7 * 60 }),
+  }),
+  filters: Object.freeze({ query: "", minimumSplitValue: null }),
+});
+
+export function defaultUserPreferences(): UserPreferences {
+  return {
+    alerts: {
+      ...DEFAULT_USER_PREFERENCES.alerts,
+      hulls: [],
+      systems: [],
+      routes: [],
+      quietHours: { ...DEFAULT_USER_PREFERENCES.alerts.quietHours },
+    },
+    filters: { ...DEFAULT_USER_PREFERENCES.filters },
+  };
+}
+
 // The dashboard owns the wire protocol. Keep this range explicit so a viewer
 // release never silently claims compatibility with semantics it has not been
 // tested against.
@@ -61,16 +115,72 @@ export interface Settings {
   windowPlacement?: WindowPlacement;
   opacity?: OpacityLevel;
   watchClipboard?: boolean;
+  preferences?: UserPreferences;
+  updateCache?: UpdateCache;
 }
 
 export type ConnectionState =
-  "live" | "connecting" | "reconnecting" | "offline" | "error" | "unpaired" | "clip" | "warn";
+  | "live"
+  | "connecting"
+  | "reconnecting"
+  | "replaying"
+  | "stale"
+  | "offline"
+  | "error"
+  | "unpaired"
+  | "clip"
+  | "warn";
 
 export interface ConnectionStatus {
   state: ConnectionState;
   detail?: string;
   compatibility?: ProtocolCompatibility;
   protocolVersion?: number;
+  lastEventAt?: number;
+}
+
+export interface UserNotice {
+  level: "info" | "warn" | "error";
+  message: string;
+}
+
+export interface DiagnosticError {
+  at: number;
+  code: string;
+  message: string;
+}
+
+export interface DiagnosticsSnapshot {
+  appVersion: string;
+  serverOrigin: string;
+  connection: ConnectionStatus;
+  errors: DiagnosticError[];
+  update: UpdateInfo;
+}
+
+export type UpdateStatus = "unknown" | "checking" | "up-to-date" | "available" | "error";
+
+export interface UpdateInfo {
+  status: UpdateStatus;
+  currentVersion: string;
+  latestVersion?: string;
+  title?: string;
+  notes?: string;
+  publishedAt?: string;
+  releaseUrl?: string;
+  checkedAt?: number;
+  error?: string;
+}
+
+export interface UpdateCache {
+  checkedAt: number;
+  release: {
+    version: string;
+    title: string;
+    notes: string;
+    publishedAt: string;
+    releaseUrl: string;
+  } | null;
 }
 
 export interface FleetEntry {
@@ -200,6 +310,11 @@ export interface IpcInvokeContract {
   opacity: { request: number; result: OpacityLevel };
   bump: { request: string; result: BumpResult };
   clipwatch: { request: boolean | undefined; result: ClipboardResult };
+  preferences: { request: undefined; result: UserPreferences };
+  savePreferences: { request: UserPreferences; result: UserPreferences };
+  diagnostics: { request: undefined; result: DiagnosticsSnapshot };
+  checkUpdate: { request: undefined; result: UpdateInfo };
+  openUpdate: { request: undefined; result: boolean };
   close: { request: undefined; result: void };
 }
 
@@ -212,6 +327,8 @@ export interface IpcEventContract {
   bumpCleared: BumpClearedEvent;
   clipwatch: ClipboardResult;
   unpaired: undefined;
+  notice: UserNotice;
+  update: UpdateInfo;
 }
 
 export interface ViewerApi {
@@ -221,6 +338,11 @@ export interface ViewerApi {
   setOpacity(level: number): Promise<OpacityLevel>;
   bump(scanId: string): Promise<BumpResult>;
   clipwatch(on?: boolean): Promise<ClipboardResult>;
+  preferences(): Promise<UserPreferences>;
+  savePreferences(preferences: UserPreferences): Promise<UserPreferences>;
+  diagnostics(): Promise<DiagnosticsSnapshot>;
+  checkUpdate(): Promise<UpdateInfo>;
+  openUpdate(): Promise<boolean>;
   quit(): Promise<void>;
   onScan(listener: (scan: Scan) => void): void;
   onStatus(listener: (status: ConnectionStatus) => void): void;
@@ -230,6 +352,8 @@ export interface ViewerApi {
   onBumpCleared(listener: (event: BumpClearedEvent) => void): void;
   onClipWatch(listener: (result: ClipboardResult) => void): void;
   onUnpaired(listener: () => void): void;
+  onNotice(listener: (notice: UserNotice) => void): void;
+  onUpdate(listener: (update: UpdateInfo) => void): void;
 }
 
 function isKnownCapability(value: string): value is KnownCapability {
@@ -308,6 +432,123 @@ function parseWindowPlacement(value: unknown): WindowPlacement | null {
     : null;
 }
 
+function parsePreferenceList(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length > 50) return null;
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    const text = boundedString(item, 128, 1)?.trim();
+    if (!text) return null;
+    const key = text.toLocaleLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      normalized.push(text);
+    }
+  }
+  return normalized;
+}
+
+function parseNullableSplitValue(value: unknown): number | null | undefined {
+  if (value === null) return null;
+  const parsed = boundedNumber(value, { minimum: 0, maximum: 1_000_000_000_000_000 });
+  return parsed === null ? undefined : parsed;
+}
+
+export function parseUserPreferences(value: unknown): UserPreferences | null {
+  const source = plainRecord(value);
+  if (!source || !hasOnlyKeys(source, ["alerts", "filters"])) return null;
+  const alerts = plainRecord(source.alerts);
+  const filters = plainRecord(source.filters);
+  if (
+    !alerts ||
+    !filters ||
+    !hasOnlyKeys(alerts, [
+      "enabled",
+      "muted",
+      "includeSensitiveDetails",
+      "minimumSplitValue",
+      "hulls",
+      "systems",
+      "routes",
+      "quietHours",
+    ]) ||
+    !hasOnlyKeys(filters, ["query", "minimumSplitValue"]) ||
+    typeof alerts.enabled !== "boolean" ||
+    typeof alerts.muted !== "boolean" ||
+    typeof alerts.includeSensitiveDetails !== "boolean"
+  )
+    return null;
+
+  const minimumSplitValue = parseNullableSplitValue(alerts.minimumSplitValue);
+  const filterMinimumSplitValue = parseNullableSplitValue(filters.minimumSplitValue);
+  const hulls = parsePreferenceList(alerts.hulls);
+  const systems = parsePreferenceList(alerts.systems);
+  const routes = parsePreferenceList(alerts.routes);
+  const quiet = plainRecord(alerts.quietHours);
+  const query = boundedString(filters.query, 256);
+  if (
+    minimumSplitValue === undefined ||
+    filterMinimumSplitValue === undefined ||
+    !hulls ||
+    !systems ||
+    !routes ||
+    query === null ||
+    !quiet ||
+    !hasOnlyKeys(quiet, ["enabled", "startMinute", "endMinute"]) ||
+    typeof quiet.enabled !== "boolean"
+  )
+    return null;
+  const startMinute = boundedNumber(quiet.startMinute, {
+    minimum: 0,
+    maximum: 1_439,
+    integer: true,
+  });
+  const endMinute = boundedNumber(quiet.endMinute, {
+    minimum: 0,
+    maximum: 1_439,
+    integer: true,
+  });
+  if (startMinute === null || endMinute === null || (quiet.enabled && startMinute === endMinute)) {
+    return null;
+  }
+  return {
+    alerts: {
+      enabled: alerts.enabled,
+      muted: alerts.muted,
+      includeSensitiveDetails: alerts.includeSensitiveDetails,
+      minimumSplitValue,
+      hulls,
+      systems,
+      routes,
+      quietHours: { enabled: quiet.enabled, startMinute, endMinute },
+    },
+    filters: { query: query.trim(), minimumSplitValue: filterMinimumSplitValue },
+  };
+}
+
+export function parseUpdateCache(value: unknown): UpdateCache | null {
+  const source = plainRecord(value);
+  if (!source || !hasOnlyKeys(source, ["checkedAt", "release"])) return null;
+  const checkedAt = boundedNumber(source.checkedAt, {
+    minimum: 0,
+    maximum: VALIDATION_LIMITS.maxTimestamp,
+    integer: true,
+  });
+  if (checkedAt === null) return null;
+  if (source.release === null) return { checkedAt, release: null };
+  const release = plainRecord(source.release);
+  if (!release || !hasOnlyKeys(release, ["version", "title", "notes", "publishedAt", "releaseUrl"]))
+    return null;
+  const version = boundedString(release.version, 64, 1);
+  const title = boundedString(release.title, 256);
+  const notes = boundedString(release.notes, 16_384);
+  const publishedAt = boundedString(release.publishedAt, 64);
+  const releaseUrl = boundedString(release.releaseUrl, VALIDATION_LIMITS.url, 1);
+  return version && title !== null && notes !== null && publishedAt !== null && releaseUrl
+    ? { checkedAt, release: { version, title, notes, publishedAt, releaseUrl } }
+    : null;
+}
+
 export function parseSettings(value: unknown): Settings {
   const source = plainRecord(value);
   if (!source) return {};
@@ -332,6 +573,10 @@ export function parseSettings(value: unknown): Settings {
   if (source.opacity === 0 || source.opacity === 1 || source.opacity === 2)
     settings.opacity = source.opacity;
   if (typeof source.watchClipboard === "boolean") settings.watchClipboard = source.watchClipboard;
+  const preferences = parseUserPreferences(source.preferences);
+  if (preferences) settings.preferences = preferences;
+  const updateCache = parseUpdateCache(source.updateCache);
+  if (updateCache) settings.updateCache = updateCache;
   return settings;
 }
 
@@ -617,12 +862,17 @@ export function parseServerError(value: unknown): {
 
 export function parseConnectionStatus(value: unknown): ConnectionStatus | null {
   const source = plainRecord(value);
-  if (!source || !hasOnlyKeys(source, ["state", "detail", "compatibility", "protocolVersion"]))
+  if (
+    !source ||
+    !hasOnlyKeys(source, ["state", "detail", "compatibility", "protocolVersion", "lastEventAt"])
+  )
     return null;
   const states: readonly ConnectionState[] = [
     "live",
     "connecting",
     "reconnecting",
+    "replaying",
+    "stale",
     "offline",
     "error",
     "unpaired",
@@ -653,6 +903,119 @@ export function parseConnectionStatus(value: unknown): ConnectionStatus | null {
     });
     if (protocolVersion === null) return null;
     result.protocolVersion = protocolVersion;
+  }
+  if (source.lastEventAt !== undefined) {
+    const lastEventAt = boundedNumber(source.lastEventAt, {
+      minimum: 0,
+      maximum: VALIDATION_LIMITS.maxTimestamp,
+      integer: true,
+    });
+    if (lastEventAt === null) return null;
+    result.lastEventAt = lastEventAt;
+  }
+  return result;
+}
+
+export function parseUserNotice(value: unknown): UserNotice | null {
+  const source = plainRecord(value);
+  if (!source || !hasOnlyKeys(source, ["level", "message"])) return null;
+  if (source.level !== "info" && source.level !== "warn" && source.level !== "error") return null;
+  const message = boundedString(source.message, VALIDATION_LIMITS.label, 1);
+  return message ? { level: source.level, message } : null;
+}
+
+function parseDiagnosticError(value: unknown): DiagnosticError | null {
+  const source = plainRecord(value);
+  if (!source || !hasOnlyKeys(source, ["at", "code", "message"])) return null;
+  const at = boundedNumber(source.at, {
+    minimum: 0,
+    maximum: VALIDATION_LIMITS.maxTimestamp,
+    integer: true,
+  });
+  const code = boundedString(source.code, 64, 1);
+  const message = boundedString(source.message, VALIDATION_LIMITS.label, 1);
+  return at !== null && code && message ? { at, code, message } : null;
+}
+
+export function parseDiagnosticsSnapshot(value: unknown): DiagnosticsSnapshot | null {
+  const source = plainRecord(value);
+  if (
+    !source ||
+    !hasOnlyKeys(source, ["appVersion", "serverOrigin", "connection", "errors", "update"])
+  ) {
+    return null;
+  }
+  const appVersion = boundedString(source.appVersion, 64, 1);
+  const serverOrigin = boundedString(source.serverOrigin, VALIDATION_LIMITS.url);
+  const connection = parseConnectionStatus(source.connection);
+  const update = parseUpdateInfo(source.update);
+  if (
+    !appVersion ||
+    serverOrigin === null ||
+    !connection ||
+    !update ||
+    !Array.isArray(source.errors)
+  )
+    return null;
+  if (source.errors.length > 10) return null;
+  const errors = source.errors.map(parseDiagnosticError);
+  return errors.every((error): error is DiagnosticError => error !== null)
+    ? { appVersion, serverOrigin, connection, errors, update }
+    : null;
+}
+
+export function parseUpdateInfo(value: unknown): UpdateInfo | null {
+  const source = plainRecord(value);
+  if (
+    !source ||
+    !hasOnlyKeys(source, [
+      "status",
+      "currentVersion",
+      "latestVersion",
+      "title",
+      "notes",
+      "publishedAt",
+      "releaseUrl",
+      "checkedAt",
+      "error",
+    ])
+  )
+    return null;
+  const statuses: readonly UpdateStatus[] = [
+    "unknown",
+    "checking",
+    "up-to-date",
+    "available",
+    "error",
+  ];
+  if (!statuses.includes(source.status as UpdateStatus)) return null;
+  const currentVersion = boundedString(source.currentVersion, 64, 1);
+  if (!currentVersion) return null;
+  const result: UpdateInfo = { status: source.status as UpdateStatus, currentVersion };
+  const stringFields = {
+    latestVersion: 64,
+    title: 256,
+    notes: 16_384,
+    publishedAt: 64,
+    releaseUrl: VALIDATION_LIMITS.url,
+    error: VALIDATION_LIMITS.label,
+  } as const;
+  for (const [key, maximum] of Object.entries(stringFields) as Array<
+    [keyof typeof stringFields, number]
+  >) {
+    if (source[key] === undefined) continue;
+    const parsed = boundedString(source[key], maximum);
+    if (parsed === null) return null;
+    result[key] = parsed;
+  }
+  if (source.checkedAt !== undefined) {
+    const checkedAt = boundedNumber(source.checkedAt, {
+      minimum: 0,
+      maximum: VALIDATION_LIMITS.maxTimestamp,
+      integer: true,
+    });
+    if (checkedAt === null) return null;
+    result.checkedAt = checkedAt;
   }
   return result;
 }

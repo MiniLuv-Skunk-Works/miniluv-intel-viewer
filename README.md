@@ -55,6 +55,11 @@ the header or tray menu to connect it to another dashboard.
 - Tray controls for showing, clearing, repositioning, and re-pairing
 - Optional clipboard watching for EVE fits and cargo lists
 - Replay recovery after brief network interruptions
+- Connection freshness, last-event time, and privacy-safe diagnostics
+- Independent compact feed filters using text and minimum split value
+- Opt-in desktop alerts with quiet hours, persistent mute, and configurable
+  split-value, hull, system, or route conditions
+- Stable-release awareness with release notes and a deliberate browser download action
 - Single-instance behavior so duplicate launches focus the existing window
 
 ## Privacy and security
@@ -65,10 +70,20 @@ secrets, URLs, email addresses, source code, prose, and content that does not
 match the paired dashboard's EVE item vocabulary. If the vocabulary is
 unavailable, the filter fails closed and sends nothing.
 
+Desktop alerts are also **off by default**. Alert matching happens locally and
+is independent of visible-feed filters. Notifications use generic lock-screen
+text unless **Show intel details on the lock screen** is explicitly enabled.
+Retained and replayed scans never produce desktop alerts.
+
 The renderer is sandboxed, has no Node.js integration, and communicates through
 a narrow typed preload bridge. Pairing credentials are encrypted with Electron
 `safeStorage` and never exposed to renderer JavaScript. Authenticated traffic
 requires HTTPS except for an explicit loopback-only development switch.
+
+The viewer checks GitHub for the latest stable release at most once per day. It
+does not download, execute, or replace the application. The download action
+opens only this repository's validated GitHub release page in the system
+browser; users should still verify the published checksum and provenance.
 
 Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 

@@ -155,6 +155,7 @@ const manager = new FeedConnectionManager({
   connectionTimeoutMs: 10,
   responseTimeoutMs: 20,
   idleTimeoutMs: 100,
+  staleTimeoutMs: 50,
   onStatus: (status) =>
     statuses.push(status.state + ("detail" in status ? ":" + status.detail : "")),
   onEvent: (message) => {
@@ -299,6 +300,7 @@ const idleManager = new FeedConnectionManager({
   connectionTimeoutMs: 10,
   responseTimeoutMs: 20,
   idleTimeoutMs: 100,
+  staleTimeoutMs: 50,
   onStatus: (status) =>
     idleStatuses.push(status.state + ("detail" in status ? ":" + status.detail : "")),
   onEvent: () => {},
@@ -309,11 +311,17 @@ const idleManager = new FeedConnectionManager({
 idleManager.start({ serverUrl: "https://idle.example", token: "idle-token" });
 const idleResponse = idleTransport.attempts[0]?.respond();
 const originalIdle = idleClock.active(100)[0];
+const originalStale = idleClock.active(50)[0];
 idleResponse?.emit("data", ": heartbeat\n\n");
 ok(
   "heartbeat activity resets the idle deadline",
-  originalIdle?.cleared && idleClock.active(100).length === 1,
+  originalIdle?.cleared && originalStale?.cleared && idleClock.active(100).length === 1,
 );
+const currentStale = idleClock.active(50)[0];
+if (currentStale) idleClock.run(currentStale);
+ok("silent live feeds become stale before disconnecting", idleStatuses.includes("stale"));
+idleResponse?.emit("data", ": heartbeat\n\n");
+ok("stream activity restores a stale feed to live", idleStatuses.at(-1) === "live");
 const currentIdle = idleClock.active(100)[0];
 if (currentIdle) idleClock.run(currentIdle);
 ok(

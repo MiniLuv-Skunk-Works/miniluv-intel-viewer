@@ -35,7 +35,20 @@ describe("main-process authority", () => {
     const handlers = source("ipc-handlers.ts");
     assert.match(handlers, /runAuthorizedIpc/);
     assert.match(handlers, /getWebContents/);
-    for (const channel of ["pair", "unpair", "state", "opacity", "bump", "clipwatch", "close"]) {
+    for (const channel of [
+      "pair",
+      "unpair",
+      "state",
+      "opacity",
+      "bump",
+      "clipwatch",
+      "preferences",
+      "savePreferences",
+      "diagnostics",
+      "checkUpdate",
+      "openUpdate",
+      "close",
+    ]) {
       assert.match(handlers, new RegExp(`handle\\(\\s*"${channel}"`));
     }
   });

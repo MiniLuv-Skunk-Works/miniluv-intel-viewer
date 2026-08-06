@@ -100,9 +100,15 @@ After `npm run build`, close any development copy and launch
 13. A window saved on a secondary display, including one with negative coordinates, reopens on that display.
 14. Changing that display's resolution or DPI, or unplugging it, leaves the running and relaunched viewer reachable.
 15. Reset position works from primary and secondary displays and resets within the nearest display's work area.
+16. A live feed becomes stale after the bounded silence period, shows its last successful event time, and returns to live after activity.
+17. Filters change only the visible feed; matching fresh scans can still alert when alerts are enabled.
+18. Quiet hours and persistent mute suppress alerts, replayed scans do not alert, and detailed lock-screen text appears only after explicit opt-in.
+19. Diagnostics show version, dashboard origin, connection state, last event, and redacted errors without scan content or credentials.
+20. Stable update awareness shows bounded plain-text notes and opens only the repository release page; it never downloads or launches an executable.
 
 The automated packaged smoke test covers launch, local rendering, and shutdown.
-Pairing, tray, live-feed, bump, clipboard, multi-monitor, and DPI checks remain
+Pairing, tray, live-feed, bump, clipboard, native notifications, update links,
+multi-monitor, and DPI checks remain
 manual and require a compatible dashboard where noted.
 
 ## Windows build troubleshooting

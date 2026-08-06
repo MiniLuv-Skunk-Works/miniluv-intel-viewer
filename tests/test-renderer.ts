@@ -12,7 +12,12 @@ import type {
   Scan,
   ViewerApi,
   ViewerState,
+  UserPreferences,
+  DiagnosticsSnapshot,
+  UpdateInfo,
+  UserNotice,
 } from "../contracts";
+import { defaultUserPreferences } from "../contracts";
 import { startRenderer, type RendererRuntime } from "../renderer/controller";
 import { ok } from "./support/assertions";
 
@@ -39,6 +44,9 @@ class FakeApi implements ViewerApi {
   private bumpClearedListener: (event: BumpClearedEvent) => void = () => undefined;
   private clipListener: (result: ClipboardResult) => void = () => undefined;
   private unpairedListener: () => void = () => undefined;
+  private noticeListener: (notice: UserNotice) => void = () => undefined;
+  private updateListener: (update: UpdateInfo) => void = () => undefined;
+  preferenceValue: UserPreferences = defaultUserPreferences();
 
   pair(serverUrl: string, code: string): Promise<PairResult> {
     this.pairCalls.push([serverUrl, code]);
@@ -60,6 +68,28 @@ class FakeApi implements ViewerApi {
   }
   clipwatch(): Promise<ClipboardResult> {
     return Promise.resolve(emptyClipboard());
+  }
+  preferences(): Promise<UserPreferences> {
+    return Promise.resolve(this.preferenceValue);
+  }
+  savePreferences(preferences: UserPreferences): Promise<UserPreferences> {
+    this.preferenceValue = preferences;
+    return Promise.resolve(preferences);
+  }
+  diagnostics(): Promise<DiagnosticsSnapshot> {
+    return Promise.resolve({
+      appVersion: "0.4.0",
+      serverOrigin: this.stateValue.serverUrl,
+      connection: { state: "live" },
+      errors: [],
+      update: { status: "up-to-date", currentVersion: "0.4.0" },
+    });
+  }
+  checkUpdate(): Promise<UpdateInfo> {
+    return Promise.resolve({ status: "up-to-date", currentVersion: "0.4.0" });
+  }
+  openUpdate(): Promise<boolean> {
+    return Promise.resolve(true);
   }
   quit(): Promise<void> {
     return Promise.resolve();
@@ -87,6 +117,12 @@ class FakeApi implements ViewerApi {
   }
   onUnpaired(listener: () => void): void {
     this.unpairedListener = listener;
+  }
+  onNotice(listener: (notice: UserNotice) => void): void {
+    this.noticeListener = listener;
+  }
+  onUpdate(listener: (update: UpdateInfo) => void): void {
+    this.updateListener = listener;
   }
   emitScan(scan: Scan): void {
     this.scanListener(scan);
@@ -318,20 +354,21 @@ async function run(): Promise<void> {
 
   console.log("\n=== accessible state and quiet live updates ===");
   const status = document.getElementById("status");
+  const liveStatus = document.getElementById("liveStatus");
   ok(
     "connection status is a polite atomic live region",
-    status?.getAttribute("role") === "status" &&
-      status.getAttribute("aria-live") === "polite" &&
-      status.getAttribute("aria-atomic") === "true",
+    liveStatus?.getAttribute("role") === "status" &&
+      liveStatus.getAttribute("aria-live") === "polite" &&
+      liveStatus.getAttribute("aria-atomic") === "true",
   );
   api.emitStatus({ state: "offline", detail: "timeout" });
   ok("connection failure is announced", status?.textContent?.includes("timeout"));
   api.emitClip({ ...emptyClipboard(), on: true, sentKind: "fit", delivered: 1 });
-  const clipboardMessage = status?.textContent;
+  const clipboardMessage = liveStatus?.textContent;
   runtime.intervals.forEach((callback) => callback());
   ok(
     "clipboard state is exposed without timer announcement spam",
-    clipboardMessage?.includes("sent fit") && status?.textContent === clipboardMessage,
+    clipboardMessage?.includes("sent fit") && liveStatus?.textContent === clipboardMessage,
   );
   const clipButton = document.getElementById("clipBtn");
   ok(
@@ -341,15 +378,22 @@ async function run(): Promise<void> {
   );
   ok(
     "abbreviated controls have accessible names",
-    ["quitBtn", "opBtn", "repairBtn", "clearBtn"].every((id) =>
-      document.getElementById(id)?.hasAttribute("aria-label"),
+    ["quitBtn", "opBtn", "repairBtn", "clearBtn", "filterBtn", "muteBtn", "settingsBtn"].every(
+      (id) => document.getElementById(id)?.hasAttribute("aria-label"),
     ),
   );
   ok(
     "all global actions retain native keyboard semantics",
-    ["clipBtn", "clearBtn", "opBtn", "repairBtn", "quitBtn"].every(
-      (id) => document.getElementById(id)?.tagName === "BUTTON",
-    ),
+    [
+      "clipBtn",
+      "filterBtn",
+      "muteBtn",
+      "settingsBtn",
+      "clearBtn",
+      "opBtn",
+      "repairBtn",
+      "quitBtn",
+    ].every((id) => document.getElementById(id)?.tagName === "BUTTON"),
   );
 
   console.log("\n=== contrast at every transparency level ===");
