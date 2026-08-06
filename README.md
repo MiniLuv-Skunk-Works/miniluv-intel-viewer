@@ -150,9 +150,11 @@ manual recovery steps.
 
 | Path | Purpose |
 | --- | --- |
-| `main.ts` | Electron main process, pairing, feed connection, tray, and clipboard polling |
+| `main.ts` | Electron lifecycle, pairing orchestration, tray, and clipboard polling |
 | `preload.ts` | Narrow, typed IPC bridge exposed to the sandboxed renderer |
 | `contracts.ts` | Shared IPC/domain types and runtime boundary parsers |
+| `dashboard-client.ts` | Bounded, cancellable JSON requests with normalized failures |
+| `feed-connection.ts` | Single-owner SSE connection, parsing, idle detection, and jittered retry |
 | `dashboard-url.ts` | HTTPS and explicit loopback-development origin policy |
 | `credentials.ts` | OS-encrypted bearer credential storage and migration |
 | `ipc-security.ts` | Viewer-window and main-frame IPC authorization |

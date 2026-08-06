@@ -17,7 +17,9 @@ if (testsOnly) {
       "tests/test-contracts.ts",
       "tests/test-dashboard-url.ts",
       "tests/test-credentials.ts",
-      "tests/test-ipc-security.ts"
+      "tests/test-ipc-security.ts",
+      "tests/test-dashboard-client.ts",
+      "tests/test-feed-connection.ts"
     ],
     outdir: path.join(outdir, "tests"),
     bundle: true,

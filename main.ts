@@ -13,16 +13,17 @@ import { app, BrowserWindow, ipcMain, screen, Tray, Menu, clipboard, safeStorage
 import type { IpcMainInvokeEvent } from "electron";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import * as https from "node:https";
-import * as http from "node:http";
 import { URL } from "node:url";
 import { classify } from "./clipboard-filter";
 import { CredentialStore } from "./credentials";
+import { DashboardClient, type DashboardRequestFailure } from "./dashboard-client";
 import { parseDashboardOrigin, type DashboardOriginResult } from "./dashboard-url";
+import { FeedConnectionManager } from "./feed-connection";
 import { runAuthorizedIpc } from "./ipc-security";
 import {
   parseBumpClearedEvent,
   parseBumpEvent,
+  parseBumpResult,
   parseClaimResponse,
   parseClipboardRelayResponse,
   parseClipWatchRequest,
@@ -59,12 +60,21 @@ const ALLOW_INSECURE_LOCALHOST = app.commandLine.hasSwitch("allow-insecure-local
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
-let stream: http.ClientRequest | null = null;
-let retryMs = 1000;
 let quitting = false;
 let protocol: ProtocolNegotiation | null = null;
 let credentials: CredentialStore | null = null;
 let startupPairingDetail: string | null = null;
+let networkGeneration = 0;
+
+const SMALL_RESPONSE_LIMIT = 64 * 1024;
+const VOCABULARY_RESPONSE_LIMIT = 16 * 1024 * 1024;
+const VOCABULARY_RESPONSE_TIMEOUT_MS = 60_000;
+const dashboardClient = new DashboardClient();
+const feedConnection = new FeedConnectionManager({
+  onStatus: (status) => relay("status", status),
+  onEvent: ({ event, data }) => handleEvent(event, data),
+  onUnauthorized: () => { void expirePairing(); },
+});
 
 function supports(capability: KnownCapability): boolean {
   // Until a complete modern hello arrives, act like the released viewer so
@@ -117,6 +127,14 @@ function protocolStatus(name: string, negotiated: ProtocolNegotiation): Connecti
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function requestFailureMessage(result: DashboardRequestFailure): string {
+  if (result.kind === "http") {
+    const server = parseServerError(result.body);
+    return server.detail || server.error || server.message || result.message;
+  }
+  return result.message;
 }
 
 function load(): Settings {
@@ -265,29 +283,23 @@ function fetchVocabulary(): void {
   if (!supports(PROTOCOL_CAPABILITIES.clipboardVocabulary)) return;
   const auth = session();
   if (!auth) return;
+  const generation = networkGeneration;
   const { serverUrl, token } = auth;
   const target = new URL("/api/viewer/vocabulary", serverUrl);
-  const lib = target.protocol === "https:" ? https : http;
-  const req = lib.request(target, {
-    method: "GET", headers: { Authorization: "Bearer " + token }
-  }, (res) => {
-    if (res.statusCode !== 200) { res.resume(); return; }
-    let out = "";
-    res.setEncoding("utf8");
-    res.on("data", d => { out += d; });
-    res.on("end", () => {
-      try {
-        const parsed = parseVocabulary(JSON.parse(out));
-        if (!parsed) return;
-        vocabulary = new Set(parsed.words);
-        fs.writeFileSync(VOCAB_FILE(), JSON.stringify(parsed));
-        relay("clipwatch", { on: clipboardWatching(), stats: clipStats,
-                             vocabulary: vocabulary.size });
-      } catch { /* leave the cached one in place */ }
-    });
+  void dashboardClient.requestJson({
+    url: target,
+    method: "GET",
+    token,
+    parse: parseVocabulary,
+    maxResponseBytes: VOCABULARY_RESPONSE_LIMIT,
+    responseTimeoutMs: VOCABULARY_RESPONSE_TIMEOUT_MS,
+  }).then((result) => {
+    if (!result.ok || generation !== networkGeneration) return;
+    vocabulary = new Set(result.body.words);
+    try { fs.writeFileSync(VOCAB_FILE(), JSON.stringify(result.body)); } catch { /* keep the in-memory copy */ }
+    relay("clipwatch", { on: clipboardWatching(), stats: clipStats,
+                         vocabulary: vocabulary.size });
   });
-  req.on("error", () => {});
-  req.end();
 }
 
 function clipboardWatching(): boolean {
@@ -339,43 +351,35 @@ function sendClip(clip: ClipboardCapture): void {
   }
   const auth = session();
   if (!auth) return;
+  const generation = networkGeneration;
   const { serverUrl, token } = auth;
   const target = new URL("/api/viewer/clip", serverUrl);
-
-  const lib = target.protocol === "https:" ? https : http;
-  const body = JSON.stringify(clip);
-  const req = lib.request(target, {
+  void dashboardClient.requestJson({
+    url: target,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Content-Length": Buffer.byteLength(body),
-      Authorization: "Bearer " + token
+    token,
+    body: clip,
+    parse: parseClipboardRelayResponse,
+    maxResponseBytes: SMALL_RESPONSE_LIMIT,
+  }).then((result) => {
+    if (generation !== networkGeneration || (!result.ok && result.kind === "cancelled")) return;
+    if (!result.ok && result.kind !== "http") {
+      relay("clipwatch", { on: true, stats: clipStats, error: requestFailureMessage(result) });
+      return;
     }
-  }, (res) => {
-    let out = "";
-    res.setEncoding("utf8");
-    res.on("data", d => { out += d; });
-    res.on("end", () => {
-      let parsed: unknown = {};
-      try { parsed = JSON.parse(out); } catch {}
-      const response = parseServerError(parsed);
-      const relayResponse = parseClipboardRelayResponse(parsed);
-      const delivered = relayResponse?.delivered ?? 0;
-      clipStats.sent += 1;
-      clipStats.lastKind = clip.kind;
-      clipStats.lastAt = Date.now();
-      // delivered === 0 means no dashboard tab is open to receive it, which is
-      // worth saying rather than looking like it silently worked.
-      relay("clipwatch", {
-        on: true, stats: clipStats, sentKind: clip.kind,
-        delivered: res.statusCode === 200 ? delivered : null,
-        error: res.statusCode === 200 ? null : (response.error || "HTTP " + res.statusCode)
-      });
+    clipStats.sent += 1;
+    clipStats.lastKind = clip.kind;
+    clipStats.lastAt = Date.now();
+    // delivered === 0 means no dashboard tab is open to receive it, which is
+    // worth saying rather than looking like it silently worked.
+    relay("clipwatch", {
+      on: true,
+      stats: clipStats,
+      sentKind: clip.kind,
+      delivered: result.ok ? result.body.delivered : null,
+      error: result.ok ? null : requestFailureMessage(result),
     });
   });
-  req.on("error", (e) => relay("clipwatch", { on: true, stats: clipStats, error: e.message }));
-  req.write(body);
-  req.end();
 }
 
 function relay<K extends keyof IpcEventContract>(channel: K, payload: IpcEventContract[K]): void {
@@ -394,67 +398,10 @@ function connect(): void {
       : { state: "unpaired" });
     return;
   }
-  const { serverUrl, token } = auth;
-  const target = new URL("/api/feed", serverUrl);
-
-  const lib = target.protocol === "https:" ? https : http;
-  relay("status", { state: "connecting" });
-
-  const req = lib.request(target, {
-    method: "GET",
-    headers: {
-      "Authorization": "Bearer " + token,
-      "Accept": "text/event-stream",
-      "Cache-Control": "no-cache"
-    }
-  }, (res) => {
-    if (res.statusCode === 401 || res.statusCode === 403) {
-      // The token is dead. Clear it and say so, rather than retrying forever
-      // against a server that will never accept it.
-      void credentials?.clear();
-      relay("status", { state: "unpaired", detail: "pairing expired - pair again" });
-      res.resume();
-      return;
-    }
-    if (res.statusCode !== 200) {
-      relay("status", { state: "error", detail: "server returned " + res.statusCode });
-      res.resume();
-      return retry();
-    }
-
-    retryMs = 1000;
-    relay("status", { state: "live" });
-    res.setEncoding("utf8");
-
-    let buffer = "";
-    res.on("data", (chunk) => {
-      buffer += chunk;
-      let split;
-      while ((split = buffer.indexOf("\n\n")) !== -1) {
-        const raw = buffer.slice(0, split);
-        buffer = buffer.slice(split + 2);
-        handleEvent(raw);
-      }
-    });
-    res.on("end", retry);
-    res.on("error", retry);
-  });
-
-  req.on("error", (e) => {
-    relay("status", { state: "offline", detail: e.message });
-    retry();
-  });
-  req.end();
-  stream = req;
+  feedConnection.start(auth);
 }
 
-function handleEvent(raw: string): void {
-  let event = "message", data = "";
-  raw.split("\n").forEach((line) => {
-    if (line.startsWith(":")) return;                 // keepalive comment
-    if (line.startsWith("event:")) event = line.slice(6).trim();
-    else if (line.startsWith("data:")) data += line.slice(5).trim();
-  });
+function handleEvent(event: string, data: string): void {
   if (!data) return;
   let parsed: unknown;
   try { parsed = JSON.parse(data); } catch { return; }
@@ -492,16 +439,15 @@ function handleEvent(raw: string): void {
 }
 
 function stop(): void {
-  if (stream) { try { stream.destroy(); } catch {} stream = null; }
+  feedConnection.stop();
 }
 
-function retry(): void {
-  stop();
-  if (quitting) return;
-  const wait = retryMs;
-  retryMs = Math.min(retryMs * 2, 30000);
-  relay("status", { state: "reconnecting", detail: Math.round(wait / 1000) + "s" });
-  setTimeout(() => { if (!quitting) connect(); }, wait);
+async function expirePairing(): Promise<void> {
+  networkGeneration += 1;
+  dashboardClient.cancelAll();
+  protocol = null;
+  await credentials?.clear();
+  relay("status", { state: "unpaired", detail: "pairing expired - pair again" });
 }
 
 // ── ipc ─────────────────────────────────────────────────────
@@ -525,45 +471,28 @@ handleIpc("pair", () => ({ ok: false, error: "Request rejected." }), async (_eve
   const parsedOrigin = storedOrigin(serverUrl);
   if (!parsedOrigin.ok) return { ok: false, error: parsedOrigin.error };
   const target = new URL("/api/viewer/claim", parsedOrigin.origin);
-
-  const lib = parsedOrigin.protocol === "https:" ? https : http;
-  const body = JSON.stringify({ code: code });
-
-  return new Promise((resolve) => {
-    const req = lib.request(target, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }
-    }, (res) => {
-      let out = "";
-      res.setEncoding("utf8");
-      res.on("data", (d) => { out += d; });
-      res.on("end", async () => {
-        let parsed: unknown = {};
-        try { parsed = JSON.parse(out); } catch {}
-        const claim = parseClaimResponse(parsed);
-        const failure = parseServerError(parsed);
-        if (res.statusCode === 200 && claim) {
-          if (!credentials || !await credentials.set(claim.token)) {
-            resolve({ ok: false, error: "Secure credential storage is unavailable. Pair again after it is restored." });
-            return;
-          }
-          save({ serverUrl: parsedOrigin.origin }, ["token"]);
-          startupPairingDetail = null;
-          protocol = null;
-          vocabulary = null;
-          fetchVocabulary();
-          retryMs = 1000;
-          stop(); connect();
-          resolve({ ok: true });
-        } else {
-          resolve({ ok: false, error: failure.error || ("server returned " + res.statusCode) });
-        }
-      });
-    });
-    req.on("error", (e) => resolve({ ok: false, error: e.message }));
-    req.write(body);
-    req.end();
+  const result = await dashboardClient.requestJson({
+    url: target,
+    method: "POST",
+    body: { code },
+    parse: parseClaimResponse,
+    maxResponseBytes: SMALL_RESPONSE_LIMIT,
   });
+  if (!result.ok) return { ok: false, error: requestFailureMessage(result) };
+  if (!credentials || !await credentials.set(result.body.token)) {
+    return { ok: false, error: "Secure credential storage is unavailable. Pair again after it is restored." };
+  }
+
+  networkGeneration += 1;
+  dashboardClient.cancelAll();
+  stop();
+  save({ serverUrl: parsedOrigin.origin }, ["token"]);
+  startupPairingDetail = null;
+  protocol = null;
+  vocabulary = null;
+  fetchVocabulary();
+  connect();
+  return { ok: true };
 });
 
 // Forget the token and show the pairing screen. Reachable from the header and
@@ -571,6 +500,8 @@ handleIpc("pair", () => ({ ok: false, error: "Request rejected." }), async (_eve
 // Otherwise a stale token plus an unreachable server leaves no way back in.
 handleIpc("unpair", () => false, async (_event, input) => {
   if (!parseNoArguments(input)) return false;
+  networkGeneration += 1;
+  dashboardClient.cancelAll();
   stop();
   protocol = null;
   startupPairingDetail = null;
@@ -611,49 +542,33 @@ handleIpc("bump", () => ({ ok: false, error: "Request rejected." }), async (_eve
     return { ok: false, error: "This dashboard does not advertise bump control." };
   }
   const target = new URL("/api/viewer/bump", serverUrl);
-
-  const lib = target.protocol === "https:" ? https : http;
-  const body = JSON.stringify({ scanId: scanId });
-  return new Promise((resolve) => {
-    const req = lib.request(target, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(body),
-        "Authorization": "Bearer " + token
-      }
-    }, (res) => {
-      let out = "";
-      res.setEncoding("utf8");
-      res.on("data", d => { out += d; });
-      res.on("end", () => {
-        // The timer itself arrives over the feed, not from this response -
-        // so the bumper sees exactly what everyone else sees, at the same time.
-        if (res.statusCode === 200) return resolve({ ok: true });
-        let parsed: unknown = {};
-        try { parsed = JSON.parse(out); } catch {}
-        const failure = parseServerError(parsed);
-
-        // A 404 has two very different causes and they need different advice.
-        // Fastify's own not-found handler emits {error:"Not Found", message:
-        // "Route POST:/api/viewer/bump not found"} - that means the DASHBOARD
-        // predates bumping. Our handler emits {error:"unknown_scan"}, which
-        // means the scan aged out of the feed. Reporting both as "Not Found"
-        // sends people looking in the wrong place.
-        if (res.statusCode === 404 && !failure.detail &&
-            /not found/i.test(failure.message || "")) {
-          return resolve({
-            ok: false,
-            error: "This dashboard doesn't support bumping yet - it needs updating."
-          });
-        }
-        resolve({ ok: false, error: failure.detail || failure.error || ("HTTP " + res.statusCode) });
-      });
-    });
-    req.on("error", (e) => resolve({ ok: false, error: e.message }));
-    req.write(body);
-    req.end();
+  const result = await dashboardClient.requestJson({
+    url: target,
+    method: "POST",
+    token,
+    body: { scanId },
+    parse: parseBumpResult,
+    maxResponseBytes: SMALL_RESPONSE_LIMIT,
   });
+  // The timer itself arrives over the feed, not from this response, so the
+  // bumper sees exactly what everyone else sees at the same time.
+  if (result.ok) return result.body;
+
+  const failure = parseServerError(result.body);
+  // A 404 has two very different causes and they need different advice.
+  // Fastify's own not-found handler emits {error:"Not Found", message:
+  // "Route POST:/api/viewer/bump not found"} - that means the DASHBOARD
+  // predates bumping. Our handler emits {error:"unknown_scan"}, which
+  // means the scan aged out of the feed. Reporting both as "Not Found"
+  // sends people looking in the wrong place.
+  if (result.kind === "http" && result.status === 404 && !failure.detail &&
+      /not found/i.test(failure.message || "")) {
+    return {
+      ok: false,
+      error: "This dashboard doesn't support bumping yet - it needs updating."
+    };
+  }
+  return { ok: false, error: failure.detail || failure.error || requestFailureMessage(result) };
 });
 
 handleIpc("clipwatch", () => ({
@@ -724,6 +639,8 @@ if (!gotLock) {
 
   app.on("before-quit", () => {
     quitting = true;
+    networkGeneration += 1;
+    dashboardClient.cancelAll();
     stop();
     stopClipWatch();
     if (tray) { tray.destroy(); tray = null; }
