@@ -41,7 +41,7 @@ const api: ViewerApi = {
   // An integer level (0/1/2), not a window alpha. The renderer fades only the
   // background via CSS so text stays fully opaque; Electron's setOpacity would
   // fade the text too, which is the opposite of useful in an overlay.
-  setOpacity: async (level) => parseOpacity(await invokeUnknown("opacity", level)),
+  setOpacity: async (level) => parseOpacity(await invokeUnknown("opacity", level)) ?? 1,
   bump: async (scanId) =>
     parseBumpResult(await invokeUnknown("bump", scanId)) ??
       { ok: false, error: "Invalid bump response." },

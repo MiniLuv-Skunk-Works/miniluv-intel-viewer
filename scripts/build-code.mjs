@@ -14,7 +14,10 @@ if (testsOnly) {
       "tests/test-viewer.ts",
       "tests/test-security.ts",
       "tests/test-clipboard.ts",
-      "tests/test-contracts.ts"
+      "tests/test-contracts.ts",
+      "tests/test-dashboard-url.ts",
+      "tests/test-credentials.ts",
+      "tests/test-ipc-security.ts"
     ],
     outdir: path.join(outdir, "tests"),
     bundle: true,
@@ -33,7 +36,7 @@ if (testsOnly) {
       bundle: true,
       platform: "node",
       format: "cjs",
-      target: "node20",
+      target: "node24",
       external: ["electron"],
       logLevel: "info"
     }),
@@ -44,7 +47,7 @@ if (testsOnly) {
       bundle: true,
       platform: "browser",
       format: "iife",
-      target: "chrome128",
+      target: "chrome150",
       logLevel: "info"
     })
   ]);

@@ -11,10 +11,12 @@ const pre = fs.readFileSync(path.join(ROOT, "preload.ts"), "utf8");
 // inline script. Checks that look for behaviour need both files.
 const markup = fs.readFileSync(path.join(ROOT, "renderer", "index.html"), "utf8");
 const rendererJs = fs.readFileSync(path.join(ROOT, "renderer", "app.ts"), "utf8");
+const buildScript = fs.readFileSync(path.join(ROOT, "scripts", "build-code.mjs"), "utf8");
 const html = markup + "\n" + rendererJs;
 interface PackageConfig {
   main: string;
   scripts: Record<string, string>;
+  devDependencies: Record<string, string>;
   build: {
     files: string[];
     directories: { buildResources: string };
@@ -204,6 +206,9 @@ ok("window icon is inside build.files",
    "build/ is buildResources - not present in the packaged app");
 
 console.log("\n=== packaging ===");
+ok("supported Electron 43 runtime", /^\^43\.2\./.test(pkg.devDependencies.electron || ""));
+ok("electron-builder 26 upgraded with runtime", /^\^26\.15\./.test(pkg.devDependencies["electron-builder"] || ""));
+ok("production compiler targets Electron 43 stack", /target: "node24"/.test(buildScript) && /target: "chrome150"/.test(buildScript));
 ok("compiled Electron entry is configured", pkg.main === ".build/main.js", pkg.main);
 ok("compiled production is packaged", pkg.build.files.includes(".build/**/*"));
 ok("compiled tests are excluded", pkg.build.files.includes("!.build/tests/**/*"));
