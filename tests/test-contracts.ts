@@ -19,6 +19,7 @@ import {
   parseScanId,
   parseSettings,
   parseViewerState,
+  parseViewerReplayMetadata,
   parseVocabulary,
 } from "../contracts";
 import * as fs from "node:fs";
@@ -112,9 +113,11 @@ const hello = parseHelloEvent({
   name: "MiniLuv",
   protocolVersion: 1,
   capabilities: [...KNOWN_CAPABILITIES, "future-feature"],
+  replay: { status: "resumed" },
 });
 ok("viewer declares protocol version 1", VIEWER_PROTOCOL_MIN_VERSION === 1 && VIEWER_PROTOCOL_MAX_VERSION === 1);
-ok("version-1 hello parses", hello?.name === "MiniLuv" && hello.protocolVersion === 1);
+ok("version-1 replay hello parses", hello?.name === "MiniLuv" && hello.protocolVersion === 1 &&
+   hello.replay?.status === "resumed");
 ok("unknown capabilities are ignored", hello?.capabilities?.length === KNOWN_CAPABILITIES.length &&
    !(hello.capabilities as readonly string[]).includes("future-feature"));
 ok("version-1 full capability set is fully compatible",
@@ -148,6 +151,10 @@ ok("future protocol is identified without rejecting the hello", future !== null 
 ok("malformed protocol versions reject", parseHelloEvent({ name: "bad", protocolVersion: 1.5, capabilities: [] }) === null);
 ok("malformed capability lists reject", parseHelloEvent({ name: "bad", protocolVersion: 1, capabilities: ["scan-feed", 7] }) === null);
 ok("hello still requires dashboard name", parseHelloEvent({ protocolVersion: 1, capabilities: [] }) === null);
+ok("all replay states parse", ["snapshot", "resumed", "cursor-expired"].every((status) =>
+   parseViewerReplayMetadata({ status })?.status === status));
+ok("malformed replay metadata rejects", parseViewerReplayMetadata({ status: "unknown" }) === null &&
+   parseViewerReplayMetadata({ status: "resumed", extra: true }) === null);
 ok("claim requires non-empty token", parseClaimResponse({ token: "secret", future: true })?.token === "secret" && parseClaimResponse({ token: "" }) === null);
 ok("claim rejects oversized tokens", parseClaimResponse({ token: "x".repeat(8_193) }) === null);
 
@@ -226,6 +233,13 @@ ok("fixture vocabulary response parses", parseVocabulary(response(namedValue(fix
    ["vocabulary", "vocabularyResponse"]))) !== null);
 ok("fixture clipboard relay response parses", parseClipboardRelayResponse(response(namedValue(fixture,
    ["clipboardRelay", "clipboardResponse"])))?.delivered === 1);
+const fixtureReplay = asRecord(namedValue(fixture, ["replay"]));
+const fixtureReplayStates = asRecord(fixtureReplay?.states);
+ok("fixture replay cursor matches the scan event", fixtureReplay?.scanEventId ===
+   (parseScan(eventValue(fixture, ["scan", "scanEvent"]))?.id));
+ok("fixture Last-Event-ID is portable", fixtureReplay?.lastEventIdHeader === fixtureReplay?.scanEventId);
+ok("fixture cursor-expiry behavior parses", parseViewerReplayMetadata(fixtureReplayStates?.cursorExpired)?.status ===
+   "cursor-expired");
 
 console.log("\n=== vocabulary, clipboard, and status boundaries ===");
 ok("valid vocabulary parses", parseVocabulary({ words: ["tritanium", "obelisk"], buildNumber: 123 })?.words.length === 2);

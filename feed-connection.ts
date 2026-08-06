@@ -9,6 +9,7 @@ export interface FeedSession {
 export interface SseMessage {
   event: string;
   data: string;
+  id?: string;
 }
 
 export type FeedConnectionStatus =
@@ -17,7 +18,7 @@ export type FeedConnectionStatus =
 
 export interface FeedConnectionCallbacks {
   onStatus(status: FeedConnectionStatus): void;
-  onEvent(message: SseMessage): void;
+  onEvent(message: SseMessage): boolean | void;
   onUnauthorized(): void;
 }
 
@@ -47,6 +48,7 @@ const DEFAULT_IDLE_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_FRAME_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MINIMUM_RETRY_MS = 1_000;
 const DEFAULT_MAXIMUM_RETRY_MS = 30_000;
+const MAX_SEEN_SCAN_IDS = 1_024;
 
 function defaultRequest(
   url: URL,
@@ -60,6 +62,13 @@ function eventStreamContentType(value: string | undefined): boolean {
   return (value?.split(";", 1)[0]?.trim().toLowerCase() ?? "") === "text/event-stream";
 }
 
+function transmissibleHeaderValue(value: string): boolean {
+  // Node rejects control characters and code points above Latin-1 in outgoing
+  // HTTP/1 headers. Retaining the previous safe cursor requests a slightly
+  // wider replay without corrupting a Unicode ID or entering a retry loop.
+  return /^[\t\x20-\x7e\x80-\xff]+$/.test(value);
+}
+
 export class SseFrameTooLargeError extends Error {
   constructor() {
     super("SSE frame exceeded the allowed size");
@@ -70,6 +79,7 @@ export class SseFrameTooLargeError extends Error {
 export class SseParser {
   private buffer = "";
   private event = "";
+  private id: string | undefined;
   private readonly data: string[] = [];
   private frameBytes = 0;
 
@@ -88,9 +98,14 @@ export class SseParser {
 
       if (line === "") {
         if (this.data.length > 0) {
-          messages.push({ event: this.event || "message", data: this.data.join("\n") });
+          messages.push({
+            event: this.event || "message",
+            data: this.data.join("\n"),
+            ...(this.id === undefined ? {} : { id: this.id }),
+          });
         }
         this.event = "";
+        this.id = undefined;
         this.data.length = 0;
         this.frameBytes = 0;
         continue;
@@ -103,6 +118,7 @@ export class SseParser {
       if (value.startsWith(" ")) value = value.slice(1);
       if (field === "event") this.event = value;
       else if (field === "data") this.data.push(value);
+      else if (field === "id" && !value.includes("\0")) this.id = value;
     }
 
     if (this.frameBytes + Buffer.byteLength(this.buffer) > this.maxFrameBytes) {
@@ -134,6 +150,10 @@ export class FeedConnectionManager {
   private responseTimer: Timer | null = null;
   private idleTimer: Timer | null = null;
   private retryMs: number;
+  private replayEnabled = false;
+  private lastEventId: string | null = null;
+  private readonly seenScanIds = new Set<string>();
+  private readonly seenScanIdOrder: string[] = [];
 
   constructor(options: FeedConnectionOptions) {
     this.callbacks = options;
@@ -155,6 +175,7 @@ export class FeedConnectionManager {
     this.clearAll();
     this.session = { ...session };
     this.retryMs = this.minimumRetryMs;
+    this.resetReplay();
     this.connect(this.generation);
   }
 
@@ -163,6 +184,16 @@ export class FeedConnectionManager {
     this.session = null;
     this.clearAll();
     this.retryMs = this.minimumRetryMs;
+    this.resetReplay();
+  }
+
+  setReplayEnabled(enabled: boolean): void {
+    this.replayEnabled = enabled;
+    if (!enabled) {
+      this.lastEventId = null;
+      this.seenScanIds.clear();
+      this.seenScanIdOrder.length = 0;
+    }
   }
 
   private current(generation: number): boolean {
@@ -188,14 +219,17 @@ export class FeedConnectionManager {
     };
 
     let req: http.ClientRequest;
+    const headers: Record<string, string> = {
+      Authorization: "Bearer " + session.token,
+      Accept: "text/event-stream",
+      "Cache-Control": "no-cache",
+    };
+    if (this.replayEnabled && this.lastEventId) headers["Last-Event-ID"] = this.lastEventId;
+
     try {
       req = this.requestFactory(target, {
         method: "GET",
-        headers: {
-          Authorization: "Bearer " + session.token,
-          Accept: "text/event-stream",
-          "Cache-Control": "no-cache",
-        },
+        headers,
       }, (res) => {
         if (!this.current(generation) || req !== this.request) {
           res.destroy();
@@ -235,7 +269,14 @@ export class FeedConnectionManager {
           }
           this.armIdleTimer(generation);
           try {
-            for (const message of parser.push(chunk)) this.callbacks.onEvent(message);
+            for (const message of parser.push(chunk)) {
+              if (message.event === "scan" && this.replayEnabled && message.id &&
+                  this.seenScanIds.has(message.id)) continue;
+              const accepted = this.callbacks.onEvent(message);
+              if (message.event === "scan" && this.replayEnabled && message.id && accepted !== false) {
+                this.acceptScanId(message.id);
+              }
+            }
           } catch (error) {
             const detail = error instanceof SseFrameTooLargeError
               ? "feed event exceeded the allowed size"
@@ -335,5 +376,23 @@ export class FeedConnectionManager {
     if (this.retryTimer) this.clearTimer(this.retryTimer);
     this.retryTimer = null;
     this.clearConnection();
+  }
+
+  private acceptScanId(id: string): void {
+    if (transmissibleHeaderValue(id)) this.lastEventId = id;
+    if (this.seenScanIds.has(id)) return;
+    this.seenScanIds.add(id);
+    this.seenScanIdOrder.push(id);
+    if (this.seenScanIdOrder.length > MAX_SEEN_SCAN_IDS) {
+      const oldest = this.seenScanIdOrder.shift();
+      if (oldest !== undefined) this.seenScanIds.delete(oldest);
+    }
+  }
+
+  private resetReplay(): void {
+    this.replayEnabled = false;
+    this.lastEventId = null;
+    this.seenScanIds.clear();
+    this.seenScanIdOrder.length = 0;
   }
 }

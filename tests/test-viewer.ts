@@ -131,6 +131,14 @@ ok("future dashboards retain scan feed with a compact warning",
    /newer - scan feed only/.test(main));
 ok("compatibility warnings survive transient messages",
    /protocolNotice/.test(html) && /s = protocolNotice/.test(html));
+ok("scan replay is enabled only from the advertised capability",
+   /protocol\.capabilities\.includes\(PROTOCOL_CAPABILITIES\.scanReplay\)/.test(main) &&
+   /feedConnection\.setReplayEnabled\(replaySupported\)/.test(main));
+ok("scan cursors must match validated scan IDs",
+   /id !== undefined && id !== scan\.id/.test(main));
+ok("expired replay history produces a compact gap warning",
+   /hello\.replay\?\.status === "cursor-expired"/.test(main) &&
+   /Replay history expired/.test(main));
 
 console.log("\n=== bump timers survive clock skew ===");
 // The bug: left = holdMs - (Date.now() - serverAt) subtracts the viewer's

@@ -103,9 +103,11 @@ console.log("\n=== incremental SSE parser ===");
 const parser = new SseParser();
 ok("heartbeat comments do not emit events", parser.push(": heartbeat\r\n\r\n").length === 0);
 const first = parser.push("event: scan\r\ndata: first line\r\nda");
-const second = parser.push("ta:  second line\r\n\r\n");
+const second = parser.push("ta:  second line\r\nid: scan-1\r\n\r\n");
 ok("CRLF framing survives chunk splits", first.length === 0 && second.length === 1 && second[0]?.event === "scan");
 ok("multi-line data preserves newlines and field spaces", second[0]?.data === "first line\n second line", second[0]?.data);
+ok("SSE event IDs are parsed without leaking to later frames", second[0]?.id === "scan-1" &&
+  parser.push("data: next\n\n")[0]?.id === undefined);
 const lf = parser.push("data:{\"ok\":true}\n\n");
 ok("LF framing and default message events work", lf[0]?.event === "message" && lf[0]?.data === '{"ok":true}');
 let oversized = false;
@@ -127,7 +129,7 @@ const manager = new FeedConnectionManager({
   responseTimeoutMs: 20,
   idleTimeoutMs: 100,
   onStatus: (status) => statuses.push(status.state + ("detail" in status ? ":" + status.detail : "")),
-  onEvent: (message) => messages.push(message.event + ":" + message.data),
+  onEvent: (message) => { messages.push(message.event + ":" + message.data); return true; },
   onUnauthorized: () => { unauthorized += 1; },
 });
 
@@ -168,6 +170,51 @@ manager.stop();
 const attemptsAfterStop = transport.attempts.length;
 staleResponse?.emit("end");
 ok("stop cancels requests and prevents reconnection", clock.active().length === 0 && transport.attempts.length === attemptsAfterStop);
+
+console.log("\n=== offline scan replay ===");
+const replayClock = new FakeClock();
+const replayTransport = harness();
+const replayedScans: string[] = [];
+const replayManager = new FeedConnectionManager({
+  request: replayTransport.request,
+  setTimer: replayClock.set,
+  clearTimer: replayClock.clear,
+  random: () => 0,
+  onStatus: () => {},
+  onEvent: (message) => {
+    if (message.event !== "scan") return true;
+    const payload = JSON.parse(message.data) as { id?: unknown; at?: unknown };
+    if (typeof payload.id !== "string" || typeof payload.at !== "number" ||
+        message.id !== payload.id) return false;
+    replayedScans.push(payload.id);
+    return true;
+  },
+  onUnauthorized: () => {},
+});
+replayManager.start({ serverUrl: "https://replay.example", token: "token" });
+const firstReplayResponse = replayTransport.attempts[0]?.respond();
+replayManager.setReplayEnabled(true);
+firstReplayResponse?.emit("data", "event: scan\nid: scan-1\ndata: {\"id\":\"scan-1\",\"at\":1}\n\n");
+firstReplayResponse?.emit("end");
+const firstReplayRetry = replayClock.active(500)[0];
+if (firstReplayRetry) replayClock.run(firstReplayRetry);
+ok("reconnect sends the latest accepted scan cursor",
+  (replayTransport.attempts[1]?.options.headers as Record<string, string> | undefined)?.["Last-Event-ID"] === "scan-1");
+const secondReplayResponse = replayTransport.attempts[1]?.respond();
+secondReplayResponse?.emit("data",
+  "event: scan\nid: scan-1\ndata: {\"id\":\"scan-1\",\"at\":1}\n\n" +
+  "event: scan\nid: scan-2\ndata: {\"id\":\"scan-2\",\"at\":2}\n\n" +
+  "event: scan\nid: Unicode Ω\ndata: {\"id\":\"Unicode Ω\",\"at\":3}\n\n" +
+  "event: scan\nid: Unicode Ω\ndata: {\"id\":\"Unicode Ω\",\"at\":3}\n\n" +
+  "event: scan\nid: malformed\ndata: {\"id\":\"malformed\"}\n\n");
+ok("replayed, live, and Unicode scan IDs are delivered exactly once",
+  replayedScans.join(",") === "scan-1,scan-2,Unicode Ω", replayedScans);
+secondReplayResponse?.emit("end");
+const secondReplayRetry = replayClock.active(500)[0];
+if (secondReplayRetry) replayClock.run(secondReplayRetry);
+ok("rejected or untransmittable IDs cannot advance the replay cursor",
+  (replayTransport.attempts[2]?.options.headers as Record<string, string> | undefined)?.["Last-Event-ID"] === "scan-2");
+replayManager.stop();
 
 console.log("\n=== heartbeat, idle, timeout, and authentication handling ===");
 const idleClock = new FakeClock();

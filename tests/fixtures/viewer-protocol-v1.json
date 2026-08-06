@@ -1,50 +1,111 @@
 {
   "protocolVersion": 1,
+  "capabilities": [
+    "scan-feed",
+    "bump-control",
+    "clipboard-relay",
+    "clipboard-vocabulary",
+    "scan-replay"
+  ],
   "events": {
     "hello": {
-      "name": "MiniLuv Intel Dashboard",
+      "name": "Fixture Operator",
+      "viewers": 2,
       "protocolVersion": 1,
       "capabilities": [
         "scan-feed",
         "bump-control",
         "clipboard-relay",
-        "clipboard-vocabulary"
-      ]
+        "clipboard-vocabulary",
+        "scan-replay"
+      ],
+      "replay": {
+        "status": "snapshot"
+      }
     },
     "scan": {
-      "id": "fixture-scan-1",
-      "at": 1700000000000,
+      "id": "fixture-scan-0001",
+      "analysisId": "00000000-0000-4000-8000-000000000001",
+      "at": 1754000000000,
       "scout": "Fixture Scout",
+      "confidence": "full-fit",
       "hull": "Obelisk",
       "system": "Uedama",
-      "valueSell": 3000000000,
-      "fleetAll": [{ "name": "Talos", "ships": 12 }],
-      "cargoList": [{ "name": "Tritanium", "qty": 1000 }]
+      "scanGate": "Sivala",
+      "headGate": "Haatomo",
+      "pilot": null,
+      "valueSell": 2000000000,
+      "valueBuy": 1800000000,
+      "valueSplit": 1900000000,
+      "droppableSplit": 900000000,
+      "ehp": 350000,
+      "ammo": "Void S",
+      "fleetAll": [],
+      "sec": "0.5",
+      "prepped": "prepped",
+      "notes": "Synthetic protocol fixture",
+      "fitEft": "[Obelisk, Fixture]\nDamage Control II",
+      "cargoList": [
+        {
+          "name": "Tritanium",
+          "qty": 5000
+        }
+      ]
     },
     "bump": {
-      "scanId": "fixture-scan-1",
+      "scanId": "fixture-scan-0001",
+      "at": 1754000005000,
       "by": "Fixture Bumper",
-      "count": 1,
       "holdMs": 180000,
-      "remainingMs": 175000
+      "count": 1
     },
-    "bumpCleared": { "scanId": "fixture-scan-1" }
+    "bumpCleared": {
+      "scanId": "fixture-scan-0001"
+    }
   },
-  "api": {
-    "pairingClaim": {
-      "request": { "code": "000000" },
-      "response": { "token": "fixture-token-not-a-credential" }
+  "apiResponses": {
+    "pair": {
+      "code": "ABCD-2345",
+      "expiresInSec": 300
+    },
+    "claim": {
+      "token": "fixture-token-not-valid"
     },
     "bump": {
-      "request": { "scanId": "fixture-scan-1" },
-      "response": { "ok": true }
+      "scanId": "fixture-scan-0001",
+      "at": 1754000005000,
+      "by": "Fixture Bumper",
+      "holdMs": 180000,
+      "count": 1
+    },
+    "bumpClear": {
+      "cleared": true
     },
     "clipboardRelay": {
-      "request": { "kind": "cargo", "text": "Tritanium 1000" },
-      "response": { "delivered": 1 }
+      "delivered": 1
     },
     "vocabulary": {
-      "response": { "words": ["tritanium", "obelisk"], "buildNumber": 1 }
+      "buildNumber": 3448696,
+      "words": [
+        "damage",
+        "control",
+        "tritanium"
+      ]
+    }
+  },
+  "replay": {
+    "scanEventId": "fixture-scan-0001",
+    "lastEventIdHeader": "fixture-scan-0001",
+    "states": {
+      "snapshot": {
+        "status": "snapshot"
+      },
+      "resumed": {
+        "status": "resumed"
+      },
+      "cursorExpired": {
+        "status": "cursor-expired"
+      }
     }
   }
 }

@@ -18,7 +18,7 @@ import { classify } from "./clipboard-filter";
 import { CredentialStore } from "./credentials";
 import { DashboardClient, type DashboardRequestFailure } from "./dashboard-client";
 import { parseDashboardOrigin, type DashboardOriginResult } from "./dashboard-url";
-import { FeedConnectionManager } from "./feed-connection";
+import { FeedConnectionManager, type SseMessage } from "./feed-connection";
 import { runAuthorizedIpc } from "./ipc-security";
 import {
   parseBumpClearedEvent,
@@ -72,7 +72,7 @@ const VOCABULARY_RESPONSE_TIMEOUT_MS = 60_000;
 const dashboardClient = new DashboardClient();
 const feedConnection = new FeedConnectionManager({
   onStatus: (status) => relay("status", status),
-  onEvent: ({ event, data }) => handleEvent(event, data),
+  onEvent: (message) => handleEvent(message),
   onUnauthorized: () => { void expirePairing(); },
 });
 
@@ -116,6 +116,7 @@ function protocolStatus(name: string, negotiated: ProtocolNegotiation): Connecti
     "bump-control": "bumping",
     "clipboard-relay": "clipboard relay",
     "clipboard-vocabulary": "clipboard vocabulary",
+    "scan-replay": "scan replay",
   };
   return {
     state: "warn",
@@ -401,23 +402,33 @@ function connect(): void {
   feedConnection.start(auth);
 }
 
-function handleEvent(event: string, data: string): void {
-  if (!data) return;
+function handleEvent({ event, data, id }: SseMessage): boolean {
+  if (!data) return false;
   let parsed: unknown;
-  try { parsed = JSON.parse(data); } catch { return; }
+  try { parsed = JSON.parse(data); } catch { return false; }
   if (event === "scan") {
     const scan = parseScan(parsed);
-    if (scan) relay("scan", scan);
+    if (!scan || (id !== undefined && id !== scan.id)) return false;
+    relay("scan", scan);
+    return true;
   } else if (event === "bump") {
     const bump = parseBumpEvent(parsed);
-    if (bump) relay("bump", bump);
+    if (!bump) return false;
+    relay("bump", bump);
+    return true;
   } else if (event === "bumpCleared") {
     const cleared = parseBumpClearedEvent(parsed);
-    if (cleared) relay("bumpCleared", cleared);
+    if (!cleared) return false;
+    relay("bumpCleared", cleared);
+    return true;
   } else if (event === "hello") {
     const hello = parseHelloEvent(parsed);
     if (hello) {
       protocol = negotiateProtocol(hello);
+      const replaySupported = protocol.compatibility !== "legacy" &&
+        protocol.compatibility !== "newer-protocol" &&
+        protocol.capabilities.includes(PROTOCOL_CAPABILITIES.scanReplay);
+      feedConnection.setReplayEnabled(replaySupported);
       const clipboardSupported = supports(PROTOCOL_CAPABILITIES.clipboardRelay) &&
         supports(PROTOCOL_CAPABILITIES.clipboardVocabulary);
       if (clipboardSupported) {
@@ -433,9 +444,16 @@ function handleEvent(event: string, data: string): void {
       // Send this last so the persistent compatibility warning remains the
       // visible status if disabling an armed clipboard watcher also emitted an
       // explanatory clipboard event.
-      relay("status", protocolStatus(hello.name, protocol));
+      const status = protocolStatus(hello.name, protocol);
+      if (replaySupported && hello.replay?.status === "cursor-expired") {
+        status.state = "warn";
+        status.detail = "Replay history expired - showing retained scans";
+      }
+      relay("status", status);
+      return true;
     }
   }
+  return false;
 }
 
 function stop(): void {
