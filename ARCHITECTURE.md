@@ -82,6 +82,14 @@ Unknown capability strings are ignored. A version-1 dashboard that omits a
 known capability remains connected, but the corresponding optional operation
 is unavailable.
 
+Bump events carry the authoritative server epoch `at`, total `holdMs`, and the
+server-calculated `remainingMs`. The viewer prefers `remainingMs` so wall-clock
+skew cannot lengthen a hold. For compatibility with older dashboards that omit
+it, the viewer derives the initial remainder once from `at` and `holdMs`; events
+that omit both timing additions retain the legacy full-hold behavior. After
+receipt, countdown painting uses only the local monotonic clock. Bump state is
+not persisted because the dashboard remains the source of truth.
+
 ## Replay and connection ownership
 
 When `scan-replay` is advertised, each scan frame places its stable scan ID in

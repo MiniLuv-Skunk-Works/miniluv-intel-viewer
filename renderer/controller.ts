@@ -906,7 +906,8 @@ export function startRenderer(
     Object.keys(bumps).forEach((id) => {
       const bump = bumps[id];
       if (!bump) return;
-      const left = bump.remainingMs - (now - bump.receivedAt);
+      const elapsed = Math.max(0, now - bump.receivedAt);
+      const left = Math.max(0, bump.remainingMs - elapsed);
       const percent = Math.max(0, Math.min(100, (left / bump.totalMs) * 100));
       const seconds = Math.ceil(left / 1000);
       const label =
@@ -942,13 +943,22 @@ export function startRenderer(
     });
   }
   api.onBump((bump) => {
-    let remainingMs = Number(bump.remainingMs);
-    if (!Number.isFinite(remainingMs)) remainingMs = Number(bump.holdMs);
-    if (!Number.isFinite(remainingMs)) return;
+    const holdMs = Number(bump.holdMs);
+    if (!Number.isFinite(holdMs) || holdMs < 0) return;
+    const serverRemainingMs = Number(bump.remainingMs);
+    const eventAt = Number(bump.at);
+    let remainingMs: number;
+    if (Number.isFinite(serverRemainingMs)) {
+      remainingMs = serverRemainingMs;
+    } else if (Number.isFinite(eventAt) && eventAt >= 0) {
+      remainingMs = holdMs - Math.max(0, runtime.dateNow() - eventAt);
+    } else {
+      remainingMs = holdMs;
+    }
     bumps[bump.scanId] = {
       ...bump,
-      remainingMs: Math.max(0, remainingMs),
-      totalMs: Math.max(1, Number(bump.holdMs) || remainingMs || 1),
+      remainingMs: Math.max(0, Math.min(holdMs, remainingMs)),
+      totalMs: Math.max(1, holdMs),
       receivedAt: runtime.monotonicNow(),
     };
     paintBumps();

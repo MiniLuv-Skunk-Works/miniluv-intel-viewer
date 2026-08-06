@@ -174,16 +174,30 @@ ok(
 
 const bump = parseBumpEvent({
   scanId: "scan-1",
+  at: 1_700_000_000_000,
   by: "pilot",
   count: 2,
   holdMs: 180000,
   remainingMs: 90000,
   future: true,
 });
-ok("valid bump parses", bump?.remainingMs === 90000);
 ok(
-  "legacy bump without remaining parses",
+  "valid bump retains server timing",
+  bump?.at === 1_700_000_000_000 && bump.remainingMs === 90000,
+);
+ok(
+  "truly legacy bump without server timing parses",
   parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 1, holdMs: 180000 }) !== null,
+);
+ok(
+  "older bump with at but no remaining parses",
+  parseBumpEvent({
+    scanId: "scan-1",
+    at: 1_700_000_000_000,
+    by: "pilot",
+    count: 1,
+    holdMs: 180000,
+  })?.at === 1_700_000_000_000,
 );
 ok(
   "dashboard bump response parses as an event",
@@ -204,9 +218,27 @@ ok(
   parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 1, holdMs: "never" }) === null,
 );
 ok(
+  "bump rejects malformed server timestamp",
+  parseBumpEvent({ scanId: "scan-1", at: -1, by: "pilot", count: 1, holdMs: 180000 }) === null &&
+    parseBumpEvent({
+      scanId: "scan-1",
+      at: 8_640_000_000_000_001,
+      by: "pilot",
+      count: 1,
+      holdMs: 180000,
+    }) === null,
+);
+ok(
   "bump rejects out-of-range values",
   parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 0, holdMs: 1 }) === null &&
-    parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 1, holdMs: 86_400_001 }) === null,
+    parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 1, holdMs: 86_400_001 }) === null &&
+    parseBumpEvent({
+      scanId: "scan-1",
+      by: "pilot",
+      count: 1,
+      holdMs: 86_400_000,
+      remainingMs: 86_400_001,
+    }) === null,
 );
 ok(
   "bump-cleared requires scan id",
@@ -390,14 +422,16 @@ ok(
     negotiateProtocol(fixtureHello).compatibility === "fully-compatible",
 );
 ok("fixture scan parses", parseScan(eventValue(fixture, ["scan", "scanEvent"])) !== null);
+const fixtureBump = parseBumpEvent(eventValue(fixture, ["bumpEvent", "bump"]));
 ok(
-  "fixture bump event parses",
-  parseBumpEvent(eventValue(fixture, ["bumpEvent", "bump"])) !== null,
+  "fixture bump event carries server timing",
+  fixtureBump?.at === 1_754_000_005_000 && fixtureBump.remainingMs === 180000,
 );
 const fixtureApiResponses = asRecord(asRecord(fixture)?.apiResponses);
+const fixtureBumpResponse = parseBumpResponse(response(fixtureApiResponses?.bump));
 ok(
-  "fixture bump API response parses",
-  parseBumpResponse(response(fixtureApiResponses?.bump)) !== null,
+  "fixture bump API response carries server timing",
+  fixtureBumpResponse?.at === 1_754_000_005_000 && fixtureBumpResponse.remainingMs === 180000,
 );
 ok(
   "fixture bump-cleared event parses",

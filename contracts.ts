@@ -218,6 +218,7 @@ export interface Scan {
 
 export interface BumpEvent {
   scanId: string;
+  at?: number;
   by: string;
   count: number;
   holdMs: number;
@@ -689,6 +690,14 @@ export function parseBumpEvent(value: unknown): BumpEvent | null {
   const source = plainRecord(value);
   if (!source) return null;
   const scanId = boundedString(source.scanId, VALIDATION_LIMITS.id, 1);
+  const at =
+    source.at === undefined
+      ? null
+      : boundedNumberLike(source.at, {
+          minimum: 0,
+          maximum: VALIDATION_LIMITS.maxTimestamp,
+          integer: true,
+        });
   const by = boundedString(source.by, VALIDATION_LIMITS.label);
   const count = boundedNumber(source.count, {
     minimum: 1,
@@ -700,7 +709,14 @@ export function parseBumpEvent(value: unknown): BumpEvent | null {
     maximum: VALIDATION_LIMITS.maxDurationMs,
     integer: true,
   });
-  if (scanId === null || by === null || count === null || holdMs === null) return null;
+  if (
+    scanId === null ||
+    (source.at !== undefined && at === null) ||
+    by === null ||
+    count === null ||
+    holdMs === null
+  )
+    return null;
   const remainingMs =
     source.remainingMs === undefined
       ? null
@@ -710,9 +726,10 @@ export function parseBumpEvent(value: unknown): BumpEvent | null {
           integer: true,
         });
   if (source.remainingMs !== undefined && remainingMs === null) return null;
-  return remainingMs === null
-    ? { scanId, by, count, holdMs }
-    : { scanId, by, count, holdMs, remainingMs };
+  const bump: BumpEvent = { scanId, by, count, holdMs };
+  if (at !== null) bump.at = at;
+  if (remainingMs !== null) bump.remainingMs = remainingMs;
+  return bump;
 }
 
 // The dashboard returns the created bump event from POST /api/viewer/bump.

@@ -210,6 +210,9 @@ function articleFor(hull: string): HTMLElement | null {
     ) ?? null
   );
 }
+function bumpLabel(hull: string): string | null | undefined {
+  return articleFor(hull)?.querySelector<HTMLElement>(".bumpleft")?.textContent;
+}
 
 async function run(): Promise<void> {
   await flush();
@@ -228,21 +231,82 @@ async function run(): Promise<void> {
   target?.querySelector<HTMLButtonElement>(".bumpbtn")?.click();
   await flush();
   ok("bump closure preserves the exact ID", api.bumpCalls[0] === targetId, api.bumpCalls[0]);
-  api.emitBump({ scanId: targetId, by: "Bumper", count: 2, holdMs: 180000, remainingMs: 90000 });
+  api.emitBump({
+    scanId: targetId,
+    at: runtime.wallNow - 600000,
+    by: "Bumper",
+    count: 2,
+    holdMs: 180000,
+    remainingMs: 120000,
+  });
   ok(
-    "only the matching timer becomes visible",
+    "authoritative replay remainder starts at 120 seconds on only the matching timer",
     target?.querySelector<HTMLElement>(".bumprow")?.hidden === false &&
-      other?.querySelector<HTMLElement>(".bumprow")?.hidden === true,
+      other?.querySelector<HTMLElement>(".bumprow")?.hidden === true &&
+      bumpLabel("Hull 3") === "2:00",
+  );
+  runtime.wallNow += 3600000;
+  runtime.monoNow += 30000;
+  runtime.intervals.forEach((callback) => callback());
+  ok("monotonic countdown advances 30 seconds to about 90 seconds", bumpLabel("Hull 3") === "1:30");
+  api.emitScan(scan("rerender-scan", "Rerender Hull"));
+  ok(
+    "active bump survives a feed re-render without resetting",
+    bumpLabel("Hull 3") === "1:30" &&
+      articleFor("Hull 3")?.querySelector<HTMLElement>(".bumprow")?.hidden === false,
   );
   api.emitBumpCleared({ scanId: targetId });
   ok(
     "clearing uses the exact mapped timer",
-    target?.querySelector<HTMLElement>(".bumprow")?.hidden === true,
+    articleFor("Hull 3")?.querySelector<HTMLElement>(".bumprow")?.hidden === true,
   );
   ok(
     "server IDs never become selectors or DOM IDs",
     !source.includes("CSS.escape") && !source.includes("data-bump") && !source.includes("data-id"),
   );
+
+  console.log("\n=== compatible bump countdown restoration ===");
+  const timedBumps = [
+    ["older-at", "Older At Hull"],
+    ["expired-at", "Expired At Hull"],
+    ["legacy", "Legacy Hull"],
+  ] as const;
+  timedBumps.forEach(([id, hull]) => api.emitScan(scan(id, hull)));
+  api.emitBump({
+    scanId: "older-at",
+    at: runtime.wallNow - 60000,
+    by: "Older Dashboard",
+    count: 1,
+    holdMs: 180000,
+  });
+  ok("older event uses at to account for elapsed time", bumpLabel("Older At Hull") === "2:00");
+  api.emitBump({
+    scanId: "expired-at",
+    at: runtime.wallNow - 180001,
+    by: "Older Dashboard",
+    count: 1,
+    holdMs: 180000,
+  });
+  ok(
+    "expired older event stays expired instead of restarting",
+    bumpLabel("Expired At Hull") === "OUT",
+  );
+  api.emitBump({
+    scanId: "legacy",
+    by: "Legacy Dashboard",
+    count: 1,
+    holdMs: 180000,
+  });
+  ok("truly legacy event retains the full-hold fallback", bumpLabel("Legacy Hull") === "3:00");
+  api.emitBump({
+    scanId: "legacy",
+    at: runtime.wallNow - 600000,
+    by: "Malformed Dashboard",
+    count: 1,
+    holdMs: 180000,
+    remainingMs: 240000,
+  });
+  ok("overlong server remainder is clamped to the hold", bumpLabel("Legacy Hull") === "3:00");
 
   console.log("\n=== hostile values remain text ===");
   const payload = `"><img src=x onerror=ATTACK()><script>ATTACK()</script>`;
