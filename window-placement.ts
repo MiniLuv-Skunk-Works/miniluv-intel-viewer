@@ -18,22 +18,30 @@ function clamp(value: number, minimum: number, maximum: number): number {
 }
 
 function intersectionArea(left: StoredRectangle, right: StoredRectangle): number {
-  const width = Math.max(0, Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x));
-  const height = Math.max(0, Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y));
+  const width = Math.max(
+    0,
+    Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x),
+  );
+  const height = Math.max(
+    0,
+    Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y),
+  );
   return width * height;
 }
 
 function distanceToRectangleSquared(x: number, y: number, rectangle: StoredRectangle): number {
-  const dx = x < rectangle.x
-    ? rectangle.x - x
-    : x > rectangle.x + rectangle.width
-      ? x - (rectangle.x + rectangle.width)
-      : 0;
-  const dy = y < rectangle.y
-    ? rectangle.y - y
-    : y > rectangle.y + rectangle.height
-      ? y - (rectangle.y + rectangle.height)
-      : 0;
+  const dx =
+    x < rectangle.x
+      ? rectangle.x - x
+      : x > rectangle.x + rectangle.width
+        ? x - (rectangle.x + rectangle.width)
+        : 0;
+  const dy =
+    y < rectangle.y
+      ? rectangle.y - y
+      : y > rectangle.y + rectangle.height
+        ? y - (rectangle.y + rectangle.height)
+        : 0;
   return dx * dx + dy * dy;
 }
 
@@ -43,7 +51,11 @@ function primaryDisplay(displays: readonly DisplayGeometry[], primaryId: number)
   return primary;
 }
 
-function nearestDisplay(bounds: StoredRectangle, displays: readonly DisplayGeometry[], primaryId: number): DisplayGeometry {
+function nearestDisplay(
+  bounds: StoredRectangle,
+  displays: readonly DisplayGeometry[],
+  primaryId: number,
+): DisplayGeometry {
   const fallback = primaryDisplay(displays, primaryId);
   let best = fallback;
   let bestIntersection = intersectionArea(bounds, fallback.workArea);
@@ -99,20 +111,28 @@ function relativeCoordinate(
 }
 
 export function legacyBounds(settings: Settings): StoredRectangle | null {
-  if (settings.x === undefined || settings.y === undefined ||
-      settings.width === undefined || settings.height === undefined) return null;
+  if (
+    settings.x === undefined ||
+    settings.y === undefined ||
+    settings.width === undefined ||
+    settings.height === undefined
+  )
+    return null;
   return { x: settings.x, y: settings.y, width: settings.width, height: settings.height };
 }
 
 export function defaultWindowBounds(display: DisplayGeometry): StoredRectangle {
   const width = Math.min(DEFAULT_WIDTH, display.workArea.width);
   const height = Math.min(DEFAULT_HEIGHT, display.workArea.height);
-  return fitToWorkArea({
-    x: display.workArea.x + display.workArea.width - width - DEFAULT_RIGHT_GAP,
-    y: display.workArea.y + DEFAULT_TOP_GAP,
-    width,
-    height,
-  }, display.workArea);
+  return fitToWorkArea(
+    {
+      x: display.workArea.x + display.workArea.width - width - DEFAULT_RIGHT_GAP,
+      y: display.workArea.y + DEFAULT_TOP_GAP,
+      width,
+      height,
+    },
+    display.workArea,
+  );
 }
 
 export function restoreWindowBounds(

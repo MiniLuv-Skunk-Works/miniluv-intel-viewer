@@ -74,7 +74,11 @@ export class AtomicJsonFile<T> {
   private loaded = false;
   private loadedValue: T | null = null;
 
-  constructor(file: string, validate: (value: unknown) => T | null, options: AtomicJsonFileOptions = {}) {
+  constructor(
+    file: string,
+    validate: (value: unknown) => T | null,
+    options: AtomicJsonFileOptions = {},
+  ) {
     this.file = file;
     this.validate = validate;
     this.fileSystem = options.fileSystem ?? NODE_FILE_SYSTEM;
@@ -110,7 +114,10 @@ export class AtomicJsonFile<T> {
 
   write(value: T): Promise<boolean> {
     const serialized = JSON.stringify(value, null, 2);
-    const next = this.queue.then(() => this.writeAtomic(serialized), () => this.writeAtomic(serialized));
+    const next = this.queue.then(
+      () => this.writeAtomic(serialized),
+      () => this.writeAtomic(serialized),
+    );
     this.queue = next;
     return next;
   }
@@ -128,7 +135,9 @@ export class AtomicJsonFile<T> {
       const diagnostic = `${base}.corrupt-${stamp}${suffix}${extension}`;
       try {
         await this.fileSystem.copyFile(this.file, diagnostic, fsConstants.COPYFILE_EXCL);
-        try { await this.fileSystem.unlink(this.file); } catch (error) {
+        try {
+          await this.fileSystem.unlink(this.file);
+        } catch (error) {
           if (errorCode(error) !== "ENOENT") {
             this.onError(`could not remove corrupt source ${this.file}:`, error);
           }
@@ -142,7 +151,10 @@ export class AtomicJsonFile<T> {
       }
     }
     this.writable = false;
-    this.onError(`could not choose a diagnostic name for ${this.file}:`, new Error("too many collisions"));
+    this.onError(
+      `could not choose a diagnostic name for ${this.file}:`,
+      new Error("too many collisions"),
+    );
   }
 
   private async writeAtomic(serialized: string): Promise<boolean> {
@@ -180,10 +192,18 @@ export class AtomicJsonFile<T> {
       return true;
     } catch (error) {
       if (handle) {
-        try { await handle.close(); } catch { /* preserve the original error */ }
+        try {
+          await handle.close();
+        } catch {
+          /* preserve the original error */
+        }
       }
       if (temporary) {
-        try { await this.fileSystem.unlink(temporary); } catch { /* stale temp is harmless */ }
+        try {
+          await this.fileSystem.unlink(temporary);
+        } catch {
+          /* stale temp is harmless */
+        }
       }
       this.onError(`atomic write failed for ${this.file}:`, error);
       return false;
@@ -207,7 +227,11 @@ export class SettingsStore {
   private flushing: Promise<boolean> | null = null;
   private initialized = false;
 
-  constructor(pathname: string, validate: (value: unknown) => Settings | null, options: SettingsStoreOptions = {}) {
+  constructor(
+    pathname: string,
+    validate: (value: unknown) => Settings | null,
+    options: SettingsStoreOptions = {},
+  ) {
     this.file = new AtomicJsonFile(pathname, validate, options);
     this.timers = options.timers ?? NODE_TIMERS;
     this.debounceMs = options.debounceMs ?? 250;
@@ -216,7 +240,7 @@ export class SettingsStore {
   async initialize(): Promise<Settings> {
     if (this.initialized) return this.get();
     this.initialized = true;
-    this.state = await this.file.load() ?? {};
+    this.state = (await this.file.load()) ?? {};
     return this.get();
   }
 
@@ -241,7 +265,10 @@ export class SettingsStore {
     return state;
   }
 
-  async saveNow(patch: Partial<Settings>, remove: readonly (keyof Settings)[] = []): Promise<Settings> {
+  async saveNow(
+    patch: Partial<Settings>,
+    remove: readonly (keyof Settings)[] = [],
+  ): Promise<Settings> {
     this.patch(patch, remove);
     await this.flush();
     return this.state;
@@ -253,7 +280,10 @@ export class SettingsStore {
       this.timer = null;
     }
     const previous = this.flushing ?? Promise.resolve(true);
-    const current = previous.then(() => this.flushRevisions(), () => this.flushRevisions());
+    const current = previous.then(
+      () => this.flushRevisions(),
+      () => this.flushRevisions(),
+    );
     const tracked = current.finally(() => {
       if (this.flushing === tracked) this.flushing = null;
     });
@@ -265,7 +295,7 @@ export class SettingsStore {
     while (this.persistedRevision < this.revision) {
       const revision = this.revision;
       const snapshot = this.state;
-      if (!await this.file.write(snapshot)) return false;
+      if (!(await this.file.write(snapshot))) return false;
       this.persistedRevision = revision;
     }
     return this.file.flush();

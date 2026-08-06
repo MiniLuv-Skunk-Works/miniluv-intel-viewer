@@ -126,8 +126,13 @@ export function startRenderer(
     return Math.floor(minutes / 60) + "h " + (minutes % 60) + "m";
   }
   function scanName(scan: Scan): string {
-    return [scan.hull || "Unknown", scan.pilot ? "pilot " + scan.pilot : null,
-      scan.system ? "in " + scan.system : null].filter(Boolean).join(", ");
+    return [
+      scan.hull || "Unknown",
+      scan.pilot ? "pilot " + scan.pilot : null,
+      scan.system ? "in " + scan.system : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
   }
   function addKv(parent: DocumentFragment, key: string, value: string | null | undefined): void {
     if (!value) return;
@@ -165,30 +170,62 @@ export function startRenderer(
     const body = doc.createDocumentFragment();
     addKv(body, "Scout", scan.scout);
     addKv(body, "Pilot", scan.pilot);
-    addKv(body, "Route", [scan.scanGate ? scan.scanGate + " gate" : null,
-      scan.headGate ? "\u2192 " + scan.headGate : null].filter(Boolean).join("  "));
-    addKv(body, "Value", [isk(scan.valueSplit) ? isk(scan.valueSplit) + " split" : null,
-      isk(scan.valueSell) ? isk(scan.valueSell) + " sell" : null,
-      isk(scan.valueBuy) ? isk(scan.valueBuy) + " buy" : null].filter(Boolean).join("  /  "));
+    addKv(
+      body,
+      "Route",
+      [
+        scan.scanGate ? scan.scanGate + " gate" : null,
+        scan.headGate ? "\u2192 " + scan.headGate : null,
+      ]
+        .filter(Boolean)
+        .join("  "),
+    );
+    addKv(
+      body,
+      "Value",
+      [
+        isk(scan.valueSplit) ? isk(scan.valueSplit) + " split" : null,
+        isk(scan.valueSell) ? isk(scan.valueSell) + " sell" : null,
+        isk(scan.valueBuy) ? isk(scan.valueBuy) + " buy" : null,
+      ]
+        .filter(Boolean)
+        .join("  /  "),
+    );
     addKv(body, "Droppable", isk(scan.droppableSplit) ? isk(scan.droppableSplit) + " split" : "");
-    addKv(body, "Tank", ehpFmt(scan.ehp)
-      ? ehpFmt(scan.ehp) + " EHP" + (scan.ammo ? " vs " + scan.ammo : "") : "");
+    addKv(
+      body,
+      "Tank",
+      ehpFmt(scan.ehp) ? ehpFmt(scan.ehp) + " EHP" + (scan.ammo ? " vs " + scan.ammo : "") : "",
+    );
     const fleet = scan.fleetAll || [];
     if (fleet.length) {
-      const title = "Fleet needed" + (scan.sec ? " \u2014 " + scan.sec + ", " + (scan.prepped || "") : "");
-      addSection(body, title, fleet.map((entry) =>
-        String(entry.name).padEnd(9) + String(entry.ships).padStart(4)).join("\n"));
+      const title =
+        "Fleet needed" + (scan.sec ? " \u2014 " + scan.sec + ", " + (scan.prepped || "") : "");
+      addSection(
+        body,
+        title,
+        fleet
+          .map((entry) => String(entry.name).padEnd(9) + String(entry.ships).padStart(4))
+          .join("\n"),
+      );
     }
     if (scan.fitEft) addSection(body, "Fit \u2014 paste into Pyfa", scan.fitEft);
     const cargo = scan.cargoList || [];
     if (cargo.length) {
-      addSection(body, "Cargo", cargo.map((entry) =>
-        Number(entry.qty).toLocaleString().padStart(11) + "  " + entry.name).join("\n"));
+      addSection(
+        body,
+        "Cargo",
+        cargo
+          .map((entry) => Number(entry.qty).toLocaleString().padStart(11) + "  " + entry.name)
+          .join("\n"),
+      );
     }
     if (scan.notes) addSection(body, "Notes", scan.notes);
     if (!scan.fitEft && !cargo.length) {
-      body.append(element("h3", undefined, "Fit & cargo"),
-        element("div", "kv missing", "Not included in this scan."));
+      body.append(
+        element("h3", undefined, "Fit & cargo"),
+        element("div", "kv missing", "Not included in this scan."),
+      );
     }
     $("detailBody").replaceChildren(body);
     $("detailBody").setAttribute("aria-label", "Details for " + scanName(scan));
@@ -208,7 +245,7 @@ export function startRenderer(
     activeOverlay = null;
     setShellInert(false);
     if (restoreFocus) {
-      const firstRendered = scanElements.values().next().value as ScanElements[] | undefined;
+      const firstRendered = scanElements.values().next().value;
       const target = pairReturnFocus?.isConnected ? pairReturnFocus : firstRendered?.[0]?.open;
       (target ?? $("list")).focus();
     }
@@ -222,8 +259,11 @@ export function startRenderer(
     if (activeOverlay === "detail") closeDetail(false);
     pairDismissible = dismissible;
     const activeElement = doc.activeElement;
-    pairReturnFocus = returnFocus ?? (activeElement && activeElement !== doc.body
-      ? activeElement as HTMLElement : $("repairBtn"));
+    pairReturnFocus =
+      returnFocus ??
+      (activeElement && activeElement !== doc.body
+        ? (activeElement as HTMLElement)
+        : $("repairBtn"));
     $("pairCancel").hidden = !dismissible;
     activeOverlay = "pair";
     setShellInert(true);
@@ -232,11 +272,16 @@ export function startRenderer(
     $("server").focus();
   }
 
-  const focusableSelector = ["button:not([disabled])", "input:not([disabled])", "[href]",
-    "[tabindex]:not([tabindex=\"-1\"])",].join(",");
+  const focusableSelector = [
+    "button:not([disabled])",
+    "input:not([disabled])",
+    "[href]",
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(",");
   function focusableWithin(root: HTMLElement): HTMLElement[] {
-    return Array.from(root.querySelectorAll<HTMLElement>(focusableSelector)).filter((node) =>
-      !node.hidden && node.getAttribute("aria-hidden") !== "true");
+    return Array.from(root.querySelectorAll<HTMLElement>(focusableSelector)).filter(
+      (node) => !node.hidden && node.getAttribute("aria-hidden") !== "true",
+    );
   }
   function onDocumentKeydown(event: KeyboardEvent): void {
     if (!activeOverlay) return;
@@ -312,16 +357,29 @@ export function startRenderer(
       const fleetRow = element("div", "fleet");
       fleet.forEach((entry, index) => {
         if (index) fleetRow.append(doc.createTextNode("  "));
-        fleetRow.append(element("b", undefined, String(entry.ships)), doc.createTextNode(" " + entry.name));
+        fleetRow.append(
+          element("b", undefined, String(entry.ships)),
+          doc.createTextNode(" " + entry.name),
+        );
       });
       open.append(fleetRow);
     }
-    const route = [scan.scanGate ? scan.scanGate + " gate" : null,
-      scan.headGate ? "\u2192 " + scan.headGate : null].filter(Boolean).join("  ");
+    const route = [
+      scan.scanGate ? scan.scanGate + " gate" : null,
+      scan.headGate ? "\u2192 " + scan.headGate : null,
+    ]
+      .filter(Boolean)
+      .join("  ");
     if (route) open.append(element("div", "meta", route));
-    open.append(element("div", "meta", (scan.scout || "?") +
-      (scan.system ? " \u00B7 scanned in " + scan.system : "") +
-      (scan.sec ? " \u00B7 " + scan.sec + " " + (scan.prepped || "") : "")));
+    open.append(
+      element(
+        "div",
+        "meta",
+        (scan.scout || "?") +
+          (scan.system ? " \u00B7 scanned in " + scan.system : "") +
+          (scan.sec ? " \u00B7 " + scan.sec + " " + (scan.prepped || "") : ""),
+      ),
+    );
     if (scan.notes) open.append(element("div", "notes", scan.notes));
     open.addEventListener("click", () => openDetail(scan.id));
     open.addEventListener("keydown", (event) => {
@@ -357,7 +415,8 @@ export function startRenderer(
       const age = now - Number(scan.at);
       scanElements.get(scan.id)?.forEach((rendered) => {
         rendered.age.textContent = ageText(age);
-        rendered.age.className = "age" + (age > 15 * 60e3 ? " dead" : age > 5 * 60e3 ? " stale" : "");
+        rendered.age.className =
+          "age" + (age > 15 * 60e3 ? " dead" : age > 5 * 60e3 ? " stale" : "");
       });
     });
   }
@@ -368,10 +427,18 @@ export function startRenderer(
     if (shown.compatibility) protocolNotice = shown.state === "warn" ? shown : null;
     else if (shown.state === "live" && protocolNotice) shown = protocolNotice;
     if (shown.state === "unpaired") protocolNotice = null;
-    const map: Record<ConnectionState, string> = { live: "live", connecting: "warn", reconnecting: "warn",
-      offline: "bad", error: "bad", unpaired: "", clip: "live", warn: "warn" };
+    const map: Record<ConnectionState, string> = {
+      live: "live",
+      connecting: "warn",
+      reconnecting: "warn",
+      offline: "bad",
+      error: "bad",
+      unpaired: "",
+      clip: "live",
+      warn: "warn",
+    };
     $("dot").className = "dot " + (map[shown.state] || "");
-    $("status").textContent = ({
+    $("status").textContent = {
       live: "Connected",
       connecting: "Connecting\u2026",
       reconnecting: "Connection lost \u2014 retrying in " + (shown.detail || "a moment"),
@@ -380,7 +447,7 @@ export function startRenderer(
       unpaired: shown.detail || "Not paired",
       clip: shown.detail || "Clipboard scan sent",
       warn: shown.detail || "Warning",
-    })[shown.state];
+    }[shown.state];
     $("status").className = shown.state === "live" ? "status-visually-hidden" : "";
     if (shown.state === "unpaired") {
       paired = false;
@@ -400,7 +467,7 @@ export function startRenderer(
     button.disabled = true;
     button.textContent = "Pairing\u2026";
     $("pairErr").textContent = "";
-    api.pair(server, code).then((result) => {
+    void api.pair(server, code).then((result) => {
       button.disabled = false;
       button.textContent = "Pair";
       if (result.ok) {
@@ -426,11 +493,15 @@ export function startRenderer(
     applyOpacity(((opLevel + 1) % 3) as OpacityLevel);
     void api.setOpacity(opLevel);
   });
-  $("quitBtn").addEventListener("click", () => { void api.quit(); });
-  $("pairCancel").addEventListener("click", () => { if (pairDismissible) closePair(); });
+  $("quitBtn").addEventListener("click", () => {
+    void api.quit();
+  });
+  $("pairCancel").addEventListener("click", () => {
+    if (pairDismissible) closePair();
+  });
   $("detailClose").addEventListener("click", () => closeDetail());
   $("repairBtn").addEventListener("click", () => {
-    api.unpair().then(() => {
+    void api.unpair().then(() => {
       paired = false;
       showPair(true, false, $("repairBtn"));
     });
@@ -440,7 +511,10 @@ export function startRenderer(
   function setClipButton(on: boolean): void {
     $("clipBtn").classList.toggle("armed", on);
     $("clipBtn").setAttribute("aria-pressed", String(on));
-    $("clipBtn").setAttribute("aria-label", (on ? "Disable" : "Enable") + " clipboard scan watching");
+    $("clipBtn").setAttribute(
+      "aria-label",
+      (on ? "Disable" : "Enable") + " clipboard scan watching",
+    );
   }
   $("clipBtn").addEventListener("click", () => {
     void api.clipwatch(!$("clipBtn").classList.contains("armed"));
@@ -456,7 +530,8 @@ export function startRenderer(
       return;
     }
     if (result.sentKind) {
-      const message = result.delivered ? "sent " + result.sentKind + " to the dashboard"
+      const message = result.delivered
+        ? "sent " + result.sentKind + " to the dashboard"
         : "captured a " + result.sentKind + " \u2014 no dashboard tab open";
       setStatus({ state: result.delivered ? "clip" : "warn", detail: message });
       if (clipMsgTimer !== null) runtime.clearTimeout(clipMsgTimer);
@@ -483,14 +558,19 @@ export function startRenderer(
       const left = bump.remainingMs - (now - bump.receivedAt);
       const percent = Math.max(0, Math.min(100, (left / bump.totalMs) * 100));
       const seconds = Math.ceil(left / 1000);
-      const label = left <= 0 ? "OUT" : seconds >= 60
-        ? Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0") : seconds + "s";
+      const label =
+        left <= 0
+          ? "OUT"
+          : seconds >= 60
+            ? Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0")
+            : seconds + "s";
       scanElements.get(id)?.forEach((rendered) => {
         rendered.bumpRow.hidden = false;
         rendered.bumpBar.style.width = percent + "%";
         rendered.bumpLeft.textContent = label;
         rendered.bumpWho.textContent = bump.by + (bump.count > 1 ? "  \u00D7" + bump.count : "");
-        rendered.bumpRow.className = "bumprow" + (left <= 0 ? " gone" : left <= 30000 ? " warn" : "");
+        rendered.bumpRow.className =
+          "bumprow" + (left <= 0 ? " gone" : left <= 30000 ? " warn" : "");
         rendered.bumpRow.setAttribute("aria-valuenow", String(Math.round(percent)));
         rendered.bumpRow.setAttribute("aria-valuetext", label + " remaining, bumped by " + bump.by);
       });
@@ -500,7 +580,7 @@ export function startRenderer(
   function sendBump(id: string, button: HTMLButtonElement): void {
     button.disabled = true;
     button.textContent = "\u2026";
-    api.bump(id).then((result) => {
+    void api.bump(id).then((result) => {
       button.disabled = false;
       button.textContent = "BUMP";
       if (result?.ok === false) {
@@ -514,13 +594,19 @@ export function startRenderer(
     let remainingMs = Number(bump.remainingMs);
     if (!Number.isFinite(remainingMs)) remainingMs = Number(bump.holdMs);
     if (!Number.isFinite(remainingMs)) return;
-    bumps[bump.scanId] = { ...bump, remainingMs: Math.max(0, remainingMs),
-      totalMs: Math.max(1, Number(bump.holdMs) || remainingMs || 1), receivedAt: runtime.monotonicNow() };
+    bumps[bump.scanId] = {
+      ...bump,
+      remainingMs: Math.max(0, remainingMs),
+      totalMs: Math.max(1, Number(bump.holdMs) || remainingMs || 1),
+      receivedAt: runtime.monotonicNow(),
+    };
     paintBumps();
   });
   api.onBumpCleared((event) => {
     delete bumps[event.scanId];
-    scanElements.get(event.scanId)?.forEach((rendered) => { rendered.bumpRow.hidden = true; });
+    scanElements.get(event.scanId)?.forEach((rendered) => {
+      rendered.bumpRow.hidden = true;
+    });
   });
   api.onScan((scan) => {
     scans.unshift(scan);
@@ -534,7 +620,7 @@ export function startRenderer(
     render();
     showPair(true, false);
   });
-  api.state().then((state) => {
+  void api.state().then((state) => {
     paired = state.paired;
     if (state.serverUrl) $("server").value = state.serverUrl;
     applyOpacity(state.opacity == null ? 1 : state.opacity);

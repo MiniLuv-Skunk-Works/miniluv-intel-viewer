@@ -227,68 +227,83 @@ export class FeedConnectionManager {
     if (this.replayEnabled && this.lastEventId) headers["Last-Event-ID"] = this.lastEventId;
 
     try {
-      req = this.requestFactory(target, {
-        method: "GET",
-        headers,
-      }, (res) => {
-        if (!this.current(generation) || req !== this.request) {
-          res.destroy();
-          return;
-        }
-        this.response = res;
-        this.clearConnectionTimer();
-        this.clearResponseTimer();
-        const status = res.statusCode ?? 0;
-        if (status === 401 || status === 403) {
-          res.resume();
-          this.terminate(generation);
-          this.callbacks.onUnauthorized();
-          return;
-        }
-        if (status !== 200) {
-          res.resume();
-          this.callbacks.onStatus({ state: "error", detail: "server returned " + status });
-          this.scheduleRetry(generation);
-          return;
-        }
-        if (!eventStreamContentType(res.headers["content-type"])) {
-          res.resume();
-          this.callbacks.onStatus({ state: "error", detail: "server returned a non-SSE feed" });
-          this.scheduleRetry(generation);
-          return;
-        }
-
-        this.callbacks.onStatus({ state: "live" });
-        res.setEncoding("utf8");
-        this.armIdleTimer(generation);
-        res.on("data", (chunk: string) => {
-          if (!this.current(generation) || res !== this.response) return;
-          if (!active) {
-            active = true;
-            this.retryMs = this.minimumRetryMs;
+      req = this.requestFactory(
+        target,
+        {
+          method: "GET",
+          headers,
+        },
+        (res) => {
+          if (!this.current(generation) || req !== this.request) {
+            res.destroy();
+            return;
           }
-          this.armIdleTimer(generation);
-          try {
-            for (const message of parser.push(chunk)) {
-              if (message.event === "scan" && this.replayEnabled && message.id &&
-                  this.seenScanIds.has(message.id)) continue;
-              const accepted = this.callbacks.onEvent(message);
-              if (message.event === "scan" && this.replayEnabled && message.id && accepted !== false) {
-                this.acceptScanId(message.id);
-              }
-            }
-          } catch (error) {
-            const detail = error instanceof SseFrameTooLargeError
-              ? "feed event exceeded the allowed size"
-              : "feed stream was invalid";
-            this.callbacks.onStatus({ state: "offline", detail });
+          this.response = res;
+          this.clearConnectionTimer();
+          this.clearResponseTimer();
+          const status = res.statusCode ?? 0;
+          if (status === 401 || status === 403) {
+            res.resume();
+            this.terminate(generation);
+            this.callbacks.onUnauthorized();
+            return;
+          }
+          if (status !== 200) {
+            res.resume();
+            this.callbacks.onStatus({ state: "error", detail: "server returned " + status });
             this.scheduleRetry(generation);
+            return;
           }
-        });
-        res.once("end", () => this.scheduleRetry(generation));
-        res.on("error", () => this.scheduleRetry(generation));
-        res.once("aborted", () => this.scheduleRetry(generation));
-      });
+          if (!eventStreamContentType(res.headers["content-type"])) {
+            res.resume();
+            this.callbacks.onStatus({ state: "error", detail: "server returned a non-SSE feed" });
+            this.scheduleRetry(generation);
+            return;
+          }
+
+          this.callbacks.onStatus({ state: "live" });
+          res.setEncoding("utf8");
+          this.armIdleTimer(generation);
+          res.on("data", (chunk: string) => {
+            if (!this.current(generation) || res !== this.response) return;
+            if (!active) {
+              active = true;
+              this.retryMs = this.minimumRetryMs;
+            }
+            this.armIdleTimer(generation);
+            try {
+              for (const message of parser.push(chunk)) {
+                if (
+                  message.event === "scan" &&
+                  this.replayEnabled &&
+                  message.id &&
+                  this.seenScanIds.has(message.id)
+                )
+                  continue;
+                const accepted = this.callbacks.onEvent(message);
+                if (
+                  message.event === "scan" &&
+                  this.replayEnabled &&
+                  message.id &&
+                  accepted !== false
+                ) {
+                  this.acceptScanId(message.id);
+                }
+              }
+            } catch (error) {
+              const detail =
+                error instanceof SseFrameTooLargeError
+                  ? "feed event exceeded the allowed size"
+                  : "feed stream was invalid";
+              this.callbacks.onStatus({ state: "offline", detail });
+              this.scheduleRetry(generation);
+            }
+          });
+          res.once("end", () => this.scheduleRetry(generation));
+          res.on("error", () => this.scheduleRetry(generation));
+          res.once("aborted", () => this.scheduleRetry(generation));
+        },
+      );
     } catch {
       this.callbacks.onStatus({ state: "offline", detail: "feed request could not be started" });
       this.scheduleRetry(generation);

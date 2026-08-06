@@ -5,23 +5,21 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { classify as classifyRaw, isSlotHeader } from "../clipboard-filter";
+import { ok } from "./support/assertions";
 
 // A slice of EVE's real vocabulary. The live one comes from the SDE.
-const VOCAB = new Set(("tritanium pyerite mexallon isogen nocxium zydrine megacyte " +
-  "antimatter charge void null javelin imperial navy standard multifrequency microwave " +
-  "aurora gleam valkyrie hammerhead damage control ii i expanded cargohold reinforced " +
-  "bulkheads shield extender large medium small armor plates steel trimark pump core " +
-  "defense field nanite repair paste cap booster electronic hardening superiority " +
-  "obelisk charon providence fenrir high power low rig slot subsystem empty adaptive " +
-  "invulnerability multispectrum energized membrane coating hardener amplifier item")
-  .split(/\s+/));
+const VOCAB = new Set(
+  (
+    "tritanium pyerite mexallon isogen nocxium zydrine megacyte " +
+    "antimatter charge void null javelin imperial navy standard multifrequency microwave " +
+    "aurora gleam valkyrie hammerhead damage control ii i expanded cargohold reinforced " +
+    "bulkheads shield extender large medium small armor plates steel trimark pump core " +
+    "defense field nanite repair paste cap booster electronic hardening superiority " +
+    "obelisk charon providence fenrir high power low rig slot subsystem empty adaptive " +
+    "invulnerability multispectrum energized membrane coating hardener amplifier item"
+  ).split(/\s+/),
+);
 const classify = (text: unknown) => classifyRaw(text, VOCAB);
-
-let pass = 0, fail = 0;
-const ok = (name: string, condition: unknown, detail?: unknown): void => {
-  if (condition) { pass += 1; console.log("  PASS  " + name); }
-  else { fail += 1; console.log("  FAIL  " + name + (detail ? "  -> " + String(detail) : "")); }
-};
 
 console.log("\n=== must NEVER be transmitted ===");
 const forbidden = {
@@ -38,8 +36,8 @@ const forbidden = {
   "chat prose": "hey are you around later? we were going to do that thing",
   "a single word": "Obelisk",
   "a sentence with an item name": "I think the Obelisk had Damage Control II fitted honestly",
-  "empty": "",
-  "whitespace": "   \n\n  ",
+  empty: "",
+  whitespace: "   \n\n  ",
 };
 for (const [what, text] of Object.entries(forbidden)) {
   const r = classify(text);
@@ -48,11 +46,15 @@ for (const [what, text] of Object.entries(forbidden)) {
 
 console.log("\n=== should be sent, as a FIT ===");
 const fits = {
-  "a ship scan": "High Power\nDamage Control II\nLow Power\nReinforced Bulkheads II\nExpanded Cargohold II",
-  "medium power variant": "Medium Power Slot\nLarge Shield Extender II\nAdaptive Invulnerability Field II",
+  "a ship scan":
+    "High Power\nDamage Control II\nLow Power\nReinforced Bulkheads II\nExpanded Cargohold II",
+  "medium power variant":
+    "Medium Power Slot\nLarge Shield Extender II\nAdaptive Invulnerability Field II",
   "rig section first": "Rig Slot\nMedium Trimark Armor Pump II\nMedium Trimark Armor Pump II",
-  "with an EFT header": "[Obelisk, hauler]\nHigh Power\nDamage Control II\nLow Power\nExpanded Cargohold II",
-  "with empty slots": "High Power\n[empty high slot]\nLow Power\nReinforced Bulkheads II\nDamage Control II",
+  "with an EFT header":
+    "[Obelisk, hauler]\nHigh Power\nDamage Control II\nLow Power\nExpanded Cargohold II",
+  "with empty slots":
+    "High Power\n[empty high slot]\nLow Power\nReinforced Bulkheads II\nDamage Control II",
 };
 for (const [what, text] of Object.entries(fits)) {
   const r = classify(text);
@@ -65,7 +67,8 @@ const cargo = {
   "N x Item form": "5000 x Antimatter Charge L\n120 x Nanite Repair Paste",
   "leading quantity": "5000 Antimatter Charge L\n25 Navy Cap Booster 400",
   "a single quantified line": "291 Electronic Hardening Charge",
-  "module list with no slot header": "Damage Control II\nExpanded Cargohold II\nReinforced Bulkheads II",
+  "module list with no slot header":
+    "Damage Control II\nExpanded Cargohold II\nReinforced Bulkheads II",
 };
 for (const [what, text] of Object.entries(cargo)) {
   const r = classify(text);
@@ -75,26 +78,51 @@ for (const [what, text] of Object.entries(cargo)) {
 console.log("\n=== the slot-header rule matches the dashboard's ===");
 // If these drift, the viewer and the dashboard disagree about what a fit is,
 // and captures land in the wrong field with no error anywhere.
-const corePath = process.env.DASHBOARD_CORE_PARSER ||
-  path.join(__dirname, "..", "d5", "miniluv-intel-dashboard-main",
-            "packages", "core", "src", "parsing", "index.ts");
+const corePath =
+  process.env.DASHBOARD_CORE_PARSER ||
+  path.join(
+    __dirname,
+    "..",
+    "d5",
+    "miniluv-intel-dashboard-main",
+    "packages",
+    "core",
+    "src",
+    "parsing",
+    "index.ts",
+  );
 const cases: Array<[string, boolean]> = [
-  ["High Power", true], ["Medium Power", true], ["Med Power", true], ["Low Power", true],
-  ["High Power Slot", true], ["Low Power Slots", true],
-  ["Rig Slot", true], ["Rigs", true], ["Rig", true],
-  ["Subsystem", true], ["Subsystem Slot", true],
-  ["Damage Control II", false], ["Cargo", false], ["High", false], ["Drone Bay", false],
+  ["High Power", true],
+  ["Medium Power", true],
+  ["Med Power", true],
+  ["Low Power", true],
+  ["High Power Slot", true],
+  ["Low Power Slots", true],
+  ["Rig Slot", true],
+  ["Rigs", true],
+  ["Rig", true],
+  ["Subsystem", true],
+  ["Subsystem Slot", true],
+  ["Damage Control II", false],
+  ["Cargo", false],
+  ["High", false],
+  ["Drone Bay", false],
 ];
 for (const [line, expected] of cases) {
-  ok(`"${line}" -> ${expected ? "header" : "not a header"}`,
-     isSlotHeader(line) === expected, String(isSlotHeader(line)));
+  ok(
+    `"${line}" -> ${expected ? "header" : "not a header"}`,
+    isSlotHeader(line) === expected,
+    String(isSlotHeader(line)),
+  );
 }
 if (fs.existsSync(corePath)) {
   const coreSrc = fs.readFileSync(corePath, "utf8");
-  ok("dashboard still uses the rule this was copied from",
-     /high\|med\(ium\)\?\|low\)\\s\+power/.test(coreSrc.replace(/\s+/g, " ")) ||
-     /\(high\|med\(ium\)\?\|low\)/.test(coreSrc),
-     "packages/core/src/parsing/index.ts changed - re-check the copy here");
+  ok(
+    "dashboard still uses the rule this was copied from",
+    /high\|med\(ium\)\?\|low\)\\s\+power/.test(coreSrc.replace(/\s+/g, " ")) ||
+      /\(high\|med\(ium\)\?\|low\)/.test(coreSrc),
+    "packages/core/src/parsing/index.ts changed - re-check the copy here",
+  );
 } else {
   console.log("  SKIP  dashboard parser comparison (set DASHBOARD_CORE_PARSER to enable)");
 }
@@ -116,26 +144,33 @@ const shaped = {
   "IP addresses": "192.168.1.5\n10.0.0.14",
 };
 for (const [what, text] of Object.entries(shaped)) {
-  ok("rejects " + what, classify(text) === null,
-     JSON.stringify(classify(text) || {}).slice(0, 70));
+  ok("rejects " + what, classify(text) === null, JSON.stringify(classify(text) || {}).slice(0, 70));
 }
 
 console.log("\n=== fails closed without the vocabulary ===");
-ok("sends nothing before the word list arrives",
-   classifyRaw("Tritanium\t14,500,000\nPyerite\t3,200,000", null) === null,
-   "a broken feature beats forwarding a clipboard because a fetch was slow");
-ok("an empty vocabulary is treated as absent",
-   classifyRaw("Tritanium\t14,500,000\nPyerite\t3,200,000", new Set()) === null);
+ok(
+  "sends nothing before the word list arrives",
+  classifyRaw("Tritanium\t14,500,000\nPyerite\t3,200,000", null) === null,
+  "a broken feature beats forwarding a clipboard because a fetch was slow",
+);
+ok(
+  "an empty vocabulary is treated as absent",
+  classifyRaw("Tritanium\t14,500,000\nPyerite\t3,200,000", new Set()) === null,
+);
 
 console.log("\n=== size and shape guards ===");
-ok("rejects an enormous clip", classify("Tritanium\t1\n".repeat(9000)) === null,
-   "a clipboard capture has no business being a megabyte");
-ok("accepts a realistic cargo hold",
-   classify(Array.from({ length: 120 }, (_, i) => `Item\t${i + 1}`).join("\n")) !== null);
-ok("tolerates one unrecognised line, not many",
-   classify("Tritanium\t100\nPyerite\t200\nSomeNewPatchItem\t5") !== null &&
-   classify("Tritanium\t100\nQwerty\t1\nAsdfgh\t2\nZxcvbn\t3") === null,
-   "a new item after a patch is fine; a list of nonsense is not");
-
-console.log("\n" + (fail === 0 ? "ALL " + pass + " PASSED" : pass + " passed, " + fail + " FAILED"));
-process.exit(fail === 0 ? 0 : 1);
+ok(
+  "rejects an enormous clip",
+  classify("Tritanium\t1\n".repeat(9000)) === null,
+  "a clipboard capture has no business being a megabyte",
+);
+ok(
+  "accepts a realistic cargo hold",
+  classify(Array.from({ length: 120 }, (_, i) => `Item\t${i + 1}`).join("\n")) !== null,
+);
+ok(
+  "tolerates one unrecognised line, not many",
+  classify("Tritanium\t100\nPyerite\t200\nSomeNewPatchItem\t5") !== null &&
+    classify("Tritanium\t100\nQwerty\t1\nAsdfgh\t2\nZxcvbn\t3") === null,
+  "a new item after a patch is fine; a list of nonsense is not",
+);

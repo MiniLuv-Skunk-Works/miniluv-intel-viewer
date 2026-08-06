@@ -7,8 +7,15 @@ export interface WebContentsLike {
   mainFrame: unknown;
 }
 
-export function isTrustedIpcSource(event: IpcEventLike, webContents: WebContentsLike | null): boolean {
-  return webContents !== null && event.sender === webContents && event.senderFrame === webContents.mainFrame;
+export function isTrustedIpcSource(
+  event: IpcEventLike,
+  webContents: WebContentsLike | null,
+): boolean {
+  return (
+    webContents !== null &&
+    event.sender === webContents &&
+    event.senderFrame === webContents.mainFrame
+  );
 }
 
 export async function runAuthorizedIpc<T>(

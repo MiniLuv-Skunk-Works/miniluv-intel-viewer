@@ -6,6 +6,7 @@ node_modules/
 dist/
 out/
 .build/
+output/
 # Belt and braces: a built or downloaded exe dragged in for testing would sit
 # outside dist/ and GitHub would happily offer to commit 90MB of it.
 *.exe

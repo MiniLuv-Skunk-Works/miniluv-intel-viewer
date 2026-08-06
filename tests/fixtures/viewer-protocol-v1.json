@@ -86,11 +86,7 @@
     },
     "vocabulary": {
       "buildNumber": 3448696,
-      "words": [
-        "damage",
-        "control",
-        "tritanium"
-      ]
+      "words": ["damage", "control", "tritanium"]
     }
   },
   "replay": {

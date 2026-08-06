@@ -111,7 +111,9 @@ export class DashboardClient {
     try {
       if (request.body !== undefined) serializedBody = JSON.stringify(request.body);
     } catch {
-      return Promise.resolve(failure("invalid-response", "Dashboard request could not be encoded."));
+      return Promise.resolve(
+        failure("invalid-response", "Dashboard request could not be encoded."),
+      );
     }
 
     const maxResponseBytes = request.maxResponseBytes ?? this.maxResponseBytes;
@@ -161,10 +163,12 @@ export class DashboardClient {
         method: request.method,
         headers: {
           Accept: "application/json",
-          ...(serializedBody === undefined ? {} : {
-            "Content-Type": "application/json",
-            "Content-Length": Buffer.byteLength(serializedBody),
-          }),
+          ...(serializedBody === undefined
+            ? {}
+            : {
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(serializedBody),
+              }),
           ...(request.token === undefined ? {} : { Authorization: "Bearer " + request.token }),
         },
       };
@@ -182,7 +186,10 @@ export class DashboardClient {
           const isJson = jsonContentType(res.headers["content-type"]);
           if (successful && !isJson) {
             res.resume();
-            finish(failure("content-type", "Dashboard returned a non-JSON response.", status), true);
+            finish(
+              failure("content-type", "Dashboard returned a non-JSON response.", status),
+              true,
+            );
             return;
           }
 
@@ -193,11 +200,14 @@ export class DashboardClient {
             const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
             received += bytes.length;
             if (received > maxResponseBytes) {
-              finish(failure(
-                "response-too-large",
-                "Dashboard response exceeded the allowed size.",
-                status,
-              ), true);
+              finish(
+                failure(
+                  "response-too-large",
+                  "Dashboard response exceeded the allowed size.",
+                  status,
+                ),
+                true,
+              );
               return;
             }
             chunks.push(bytes);
@@ -229,7 +239,9 @@ export class DashboardClient {
             }
             const validated = request.parse(parsed);
             if (validated === null) {
-              finish(failure("invalid-response", "Dashboard returned an invalid response.", status));
+              finish(
+                failure("invalid-response", "Dashboard returned an invalid response.", status),
+              );
               return;
             }
             finish({ ok: true, status, body: validated });

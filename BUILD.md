@@ -7,9 +7,7 @@ machine that runs it — double-click and it opens.
 
 ```
 npm install
-npm run typecheck
-npm test
-npm run build
+npm run verify
 ```
 
 The exe lands in `dist\MILF-Viewer-0.1.0.exe`, around 90 MB. That's Electron —
@@ -53,7 +51,13 @@ npm start -- --allow-insecure-localhost
 before launching their respective command. The generated JavaScript is ignored
 and can be deleted at any time.
 
-## Packaged smoke test
+`npm test` includes portable Node tests and a real-Electron suite backed by a
+local mock dashboard. `npm run verify` also checks formatting and lint rules,
+builds the portable executable, and launches that exact artifact to confirm the
+pairing window renders and the process quits cleanly. Failure artifacts are
+written under `output\playwright\`.
+
+## Manual Windows smoke test
 
 After `npm run build`, close any development copy and launch
 `dist\MILF-Viewer-0.1.0.exe`. Before publishing, verify all of the following:
@@ -74,9 +78,9 @@ After `npm run build`, close any development copy and launch
 14. Change that display's resolution or DPI, or unplug it, and confirm the running and relaunched viewer remain fully reachable.
 15. Use Reset position while the viewer is on both primary and secondary displays and confirm it resets within the nearest display's work area.
 
-The pairing, live-feed, bump, and clipboard checks require a compatible
-dashboard. If one is unavailable, record those items as not exercised rather
-than treating a successful launch as a complete smoke test.
+The automated packaged smoke covers launch, local rendering, and shutdown. The
+pairing, tray, live-feed, bump, clipboard, multi-monitor, and DPI checks above
+remain manual release checks and require a compatible dashboard where noted.
 
 ## If you'd rather not build
 

@@ -25,16 +25,13 @@ export const PROTOCOL_CAPABILITIES = {
   scanReplay: "scan-replay",
 } as const;
 
-export type KnownCapability = typeof PROTOCOL_CAPABILITIES[keyof typeof PROTOCOL_CAPABILITIES];
+export type KnownCapability = (typeof PROTOCOL_CAPABILITIES)[keyof typeof PROTOCOL_CAPABILITIES];
 export const KNOWN_CAPABILITIES: readonly KnownCapability[] = Object.freeze(
   Object.values(PROTOCOL_CAPABILITIES),
 );
 
 export type ProtocolCompatibility =
-  | "fully-compatible"
-  | "legacy"
-  | "limited-capability"
-  | "newer-protocol";
+  "fully-compatible" | "legacy" | "limited-capability" | "newer-protocol";
 
 export interface StoredRectangle {
   x: number;
@@ -67,14 +64,7 @@ export interface Settings {
 }
 
 export type ConnectionState =
-  | "live"
-  | "connecting"
-  | "reconnecting"
-  | "offline"
-  | "error"
-  | "unpaired"
-  | "clip"
-  | "warn";
+  "live" | "connecting" | "reconnecting" | "offline" | "error" | "unpaired" | "clip" | "warn";
 
 export interface ConnectionStatus {
   state: ConnectionState;
@@ -246,15 +236,24 @@ function isKnownCapability(value: string): value is KnownCapability {
   return (KNOWN_CAPABILITIES as readonly string[]).includes(value);
 }
 
-type ScanStringKey = "scout" | "hull" | "system" | "pilot" | "scanGate" | "headGate" |
-  "ammo" | "sec" | "prepped" | "notes" | "fitEft";
+type ScanStringKey =
+  | "scout"
+  | "hull"
+  | "system"
+  | "pilot"
+  | "scanGate"
+  | "headGate"
+  | "ammo"
+  | "sec"
+  | "prepped"
+  | "notes"
+  | "fitEft";
 type ScanNumberKey = "valueSell" | "valueBuy" | "valueSplit" | "droppableSplit" | "ehp";
 
 function optionalString(source: UnknownRecord, key: ScanStringKey, target: Scan): boolean {
   if (!(key in source) || source[key] === undefined || source[key] === null) return true;
-  const maximum = key === "notes" || key === "fitEft"
-    ? VALIDATION_LIMITS.longText
-    : VALIDATION_LIMITS.label;
+  const maximum =
+    key === "notes" || key === "fitEft" ? VALIDATION_LIMITS.longText : VALIDATION_LIMITS.label;
   const value = boundedString(source[key], maximum);
   if (value === null) return false;
   target[key] = value;
@@ -277,8 +276,16 @@ function parseStoredRectangle(value: unknown, minimumSize: number): StoredRectan
   if (!source || !hasOnlyKeys(source, ["x", "y", "width", "height"])) return null;
   const x = boundedNumber(source.x, { minimum: -1_000_000, maximum: 1_000_000, integer: true });
   const y = boundedNumber(source.y, { minimum: -1_000_000, maximum: 1_000_000, integer: true });
-  const width = boundedNumber(source.width, { minimum: minimumSize, maximum: 100_000, integer: true });
-  const height = boundedNumber(source.height, { minimum: minimumSize, maximum: 100_000, integer: true });
+  const width = boundedNumber(source.width, {
+    minimum: minimumSize,
+    maximum: 100_000,
+    integer: true,
+  });
+  const height = boundedNumber(source.height, {
+    minimum: minimumSize,
+    maximum: 100_000,
+    integer: true,
+  });
   return x !== null && y !== null && width !== null && height !== null
     ? { x, y, width, height }
     : null;
@@ -286,7 +293,8 @@ function parseStoredRectangle(value: unknown, minimumSize: number): StoredRectan
 
 function parseWindowPlacement(value: unknown): WindowPlacement | null {
   const source = plainRecord(value);
-  if (!source || !hasOnlyKeys(source, ["bounds", "displayId", "workArea", "scaleFactor"])) return null;
+  if (!source || !hasOnlyKeys(source, ["bounds", "displayId", "workArea", "scaleFactor"]))
+    return null;
   const bounds = parseStoredRectangle(source.bounds, 100);
   const workArea = parseStoredRectangle(source.workArea, 1);
   const displayId = boundedNumber(source.displayId, {
@@ -304,19 +312,25 @@ export function parseSettings(value: unknown): Settings {
   const source = plainRecord(value);
   if (!source) return {};
   const settings: Settings = {};
-  const serverUrl = source.serverUrl === null ? null : boundedString(source.serverUrl, VALIDATION_LIMITS.url);
+  const serverUrl =
+    source.serverUrl === null ? null : boundedString(source.serverUrl, VALIDATION_LIMITS.url);
   if (serverUrl !== null || source.serverUrl === null) settings.serverUrl = serverUrl;
-  const token = source.token === null ? null : boundedString(source.token, VALIDATION_LIMITS.token, 1);
+  const token =
+    source.token === null ? null : boundedString(source.token, VALIDATION_LIMITS.token, 1);
   if ("token" in source) settings.token = token;
   for (const key of ["x", "y", "width", "height"] as const) {
-    const number = boundedNumber(source[key], key === "x" || key === "y"
-      ? { minimum: -1_000_000, maximum: 1_000_000, integer: true }
-      : { minimum: 100, maximum: 10_000, integer: true });
+    const number = boundedNumber(
+      source[key],
+      key === "x" || key === "y"
+        ? { minimum: -1_000_000, maximum: 1_000_000, integer: true }
+        : { minimum: 100, maximum: 10_000, integer: true },
+    );
     if (number !== null) settings[key] = number;
   }
   const windowPlacement = parseWindowPlacement(source.windowPlacement);
   if (windowPlacement) settings.windowPlacement = windowPlacement;
-  if (source.opacity === 0 || source.opacity === 1 || source.opacity === 2) settings.opacity = source.opacity;
+  if (source.opacity === 0 || source.opacity === 1 || source.opacity === 2)
+    settings.opacity = source.opacity;
   if (typeof source.watchClipboard === "boolean") settings.watchClipboard = source.watchClipboard;
   return settings;
 }
@@ -355,7 +369,9 @@ function parseFleet(value: unknown): FleetEntry[] | null {
     if (!source) return null;
     const name = boundedString(source.name, VALIDATION_LIMITS.label);
     const ships = boundedNumberLike(source.ships, {
-      minimum: 0, maximum: Number.MAX_SAFE_INTEGER, integer: true,
+      minimum: 0,
+      maximum: Number.MAX_SAFE_INTEGER,
+      integer: true,
     });
     if (name === null || ships === null) return null;
     entries.push({ name, ships });
@@ -371,7 +387,9 @@ function parseCargo(value: unknown): CargoEntry[] | null {
     if (!source) return null;
     const name = boundedString(source.name, VALIDATION_LIMITS.label);
     const qty = boundedNumberLike(source.qty, {
-      minimum: 0, maximum: Number.MAX_SAFE_INTEGER, integer: true,
+      minimum: 0,
+      maximum: Number.MAX_SAFE_INTEGER,
+      integer: true,
     });
     if (name === null || qty === null) return null;
     entries.push({ name, qty });
@@ -384,12 +402,26 @@ export function parseScan(value: unknown): Scan | null {
   if (!source) return null;
   const id = boundedString(source.id, VALIDATION_LIMITS.id, 1);
   const at = boundedNumberLike(source.at, {
-    minimum: 0, maximum: VALIDATION_LIMITS.maxTimestamp, integer: true,
+    minimum: 0,
+    maximum: VALIDATION_LIMITS.maxTimestamp,
+    integer: true,
   });
   if (id === null || at === null) return null;
 
   const target: Scan = { id, at };
-  for (const key of ["scout", "hull", "system", "pilot", "scanGate", "headGate", "ammo", "sec", "prepped", "notes", "fitEft"] as const) {
+  for (const key of [
+    "scout",
+    "hull",
+    "system",
+    "pilot",
+    "scanGate",
+    "headGate",
+    "ammo",
+    "sec",
+    "prepped",
+    "notes",
+    "fitEft",
+  ] as const) {
     if (!optionalString(source, key, target)) return null;
   }
   for (const key of ["valueSell", "valueBuy", "valueSplit", "droppableSplit", "ehp"] as const) {
@@ -414,15 +446,24 @@ export function parseBumpEvent(value: unknown): BumpEvent | null {
   const scanId = boundedString(source.scanId, VALIDATION_LIMITS.id, 1);
   const by = boundedString(source.by, VALIDATION_LIMITS.label);
   const count = boundedNumber(source.count, {
-    minimum: 1, maximum: Number.MAX_SAFE_INTEGER, integer: true,
+    minimum: 1,
+    maximum: Number.MAX_SAFE_INTEGER,
+    integer: true,
   });
   const holdMs = boundedNumberLike(source.holdMs, {
-    minimum: 0, maximum: VALIDATION_LIMITS.maxDurationMs, integer: true,
+    minimum: 0,
+    maximum: VALIDATION_LIMITS.maxDurationMs,
+    integer: true,
   });
   if (scanId === null || by === null || count === null || holdMs === null) return null;
-  const remainingMs = source.remainingMs === undefined ? null : boundedNumberLike(source.remainingMs, {
-    minimum: 0, maximum: VALIDATION_LIMITS.maxDurationMs, integer: true,
-  });
+  const remainingMs =
+    source.remainingMs === undefined
+      ? null
+      : boundedNumberLike(source.remainingMs, {
+          minimum: 0,
+          maximum: VALIDATION_LIMITS.maxDurationMs,
+          integer: true,
+        });
   if (source.remainingMs !== undefined && remainingMs === null) return null;
   return remainingMs === null
     ? { scanId, by, count, holdMs }
@@ -444,9 +485,14 @@ export function parseBumpClearedEvent(value: unknown): BumpClearedEvent | null {
 
 export function parseViewerReplayMetadata(value: unknown): ViewerReplayMetadata | null {
   const replay = plainRecord(value);
-  if (!replay || !hasOnlyKeys(replay, ["status"]) ||
-      (replay.status !== "snapshot" && replay.status !== "resumed" &&
-       replay.status !== "cursor-expired")) return null;
+  if (
+    !replay ||
+    !hasOnlyKeys(replay, ["status"]) ||
+    (replay.status !== "snapshot" &&
+      replay.status !== "resumed" &&
+      replay.status !== "cursor-expired")
+  )
+    return null;
   return { status: replay.status };
 }
 
@@ -458,15 +504,22 @@ export function parseHelloEvent(value: unknown): HelloEvent | null {
   const result: HelloEvent = { name };
   if (source?.protocolVersion !== undefined) {
     const version = boundedNumber(source.protocolVersion, {
-      minimum: 1, maximum: Number.MAX_SAFE_INTEGER, integer: true,
+      minimum: 1,
+      maximum: Number.MAX_SAFE_INTEGER,
+      integer: true,
     });
     if (version === null) return null;
     result.protocolVersion = version;
   }
   if (source?.capabilities !== undefined) {
-    if (!Array.isArray(source.capabilities) || source.capabilities.length > VALIDATION_LIMITS.listEntries ||
-        !source.capabilities.every((capability) =>
-          boundedString(capability, VALIDATION_LIMITS.label, 1) !== null)) return null;
+    if (
+      !Array.isArray(source.capabilities) ||
+      source.capabilities.length > VALIDATION_LIMITS.listEntries ||
+      !source.capabilities.every(
+        (capability) => boundedString(capability, VALIDATION_LIMITS.label, 1) !== null,
+      )
+    )
+      return null;
     result.capabilities = [...new Set(source.capabilities.filter(isKnownCapability))];
   }
   if (source?.replay !== undefined) {
@@ -491,7 +544,9 @@ export function negotiateProtocol(hello: HelloEvent): ProtocolNegotiation {
 
   const advertised = new Set(hello.capabilities);
   const capabilities = KNOWN_CAPABILITIES.filter((capability) => advertised.has(capability));
-  const missingCapabilities = KNOWN_CAPABILITIES.filter((capability) => !advertised.has(capability));
+  const missingCapabilities = KNOWN_CAPABILITIES.filter(
+    (capability) => !advertised.has(capability),
+  );
   if (hello.protocolVersion > VIEWER_PROTOCOL_MAX_VERSION) {
     return {
       compatibility: "newer-protocol",
@@ -511,13 +566,25 @@ export function negotiateProtocol(hello: HelloEvent): ProtocolNegotiation {
 
 export function parseVocabulary(value: unknown): Vocabulary | null {
   const source = plainRecord(value);
-  if (!source || !Array.isArray(source.words) || source.words.length === 0 ||
-      source.words.length > VALIDATION_LIMITS.vocabularyEntries ||
-      !source.words.every((word) => boundedString(word, VALIDATION_LIMITS.vocabularyWord, 1) !== null)) return null;
-  const result: Vocabulary = { words: [...source.words] as string[] };
+  if (
+    !source ||
+    !Array.isArray(source.words) ||
+    source.words.length === 0 ||
+    source.words.length > VALIDATION_LIMITS.vocabularyEntries
+  )
+    return null;
+  const words: string[] = [];
+  for (const word of source.words) {
+    const parsed = boundedString(word, VALIDATION_LIMITS.vocabularyWord, 1);
+    if (parsed === null) return null;
+    words.push(parsed);
+  }
+  const result: Vocabulary = { words };
   if (source.buildNumber !== undefined) {
     const buildNumber = boundedNumber(source.buildNumber, {
-      minimum: 0, maximum: Number.MAX_SAFE_INTEGER, integer: true,
+      minimum: 0,
+      maximum: Number.MAX_SAFE_INTEGER,
+      integer: true,
     });
     if (buildNumber === null) return null;
     result.buildNumber = buildNumber;
@@ -531,7 +598,11 @@ export function parseClaimResponse(value: unknown): ClaimResponse | null {
   return token ? { token } : null;
 }
 
-export function parseServerError(value: unknown): { error?: string; detail?: string; message?: string } {
+export function parseServerError(value: unknown): {
+  error?: string;
+  detail?: string;
+  message?: string;
+} {
   const source = plainRecord(value);
   if (!source) return {};
   const result: { error?: string; detail?: string; message?: string } = {};
@@ -546,23 +617,39 @@ export function parseServerError(value: unknown): { error?: string; detail?: str
 
 export function parseConnectionStatus(value: unknown): ConnectionStatus | null {
   const source = plainRecord(value);
-  if (!source || !hasOnlyKeys(source, ["state", "detail", "compatibility", "protocolVersion"])) return null;
-  const states: readonly ConnectionState[] = ["live", "connecting", "reconnecting", "offline", "error", "unpaired", "clip", "warn"];
+  if (!source || !hasOnlyKeys(source, ["state", "detail", "compatibility", "protocolVersion"]))
+    return null;
+  const states: readonly ConnectionState[] = [
+    "live",
+    "connecting",
+    "reconnecting",
+    "offline",
+    "error",
+    "unpaired",
+    "clip",
+    "warn",
+  ];
   if (!states.includes(source.state as ConnectionState)) return null;
-  const detail = source.detail === undefined ? undefined : boundedString(source.detail, VALIDATION_LIMITS.label);
+  const detail =
+    source.detail === undefined ? undefined : boundedString(source.detail, VALIDATION_LIMITS.label);
   if (detail === null) return null;
   const result: ConnectionStatus = { state: source.state as ConnectionState };
   if (detail !== undefined) result.detail = detail;
   if (source.compatibility !== undefined) {
     const compatibilities: readonly ProtocolCompatibility[] = [
-      "fully-compatible", "legacy", "limited-capability", "newer-protocol",
+      "fully-compatible",
+      "legacy",
+      "limited-capability",
+      "newer-protocol",
     ];
     if (!compatibilities.includes(source.compatibility as ProtocolCompatibility)) return null;
     result.compatibility = source.compatibility as ProtocolCompatibility;
   }
   if (source.protocolVersion !== undefined) {
     const protocolVersion = boundedNumber(source.protocolVersion, {
-      minimum: 1, maximum: Number.MAX_SAFE_INTEGER, integer: true,
+      minimum: 1,
+      maximum: Number.MAX_SAFE_INTEGER,
+      integer: true,
     });
     if (protocolVersion === null) return null;
     result.protocolVersion = protocolVersion;
@@ -577,25 +664,45 @@ export function parseClipboardStats(value: unknown): ClipboardStats | null {
   const sent = boundedNumber(source.sent, counterBounds);
   const ignored = boundedNumber(source.ignored, counterBounds);
   const lastAt = boundedNumber(source.lastAt, {
-    minimum: 0, maximum: VALIDATION_LIMITS.maxTimestamp, integer: true,
+    minimum: 0,
+    maximum: VALIDATION_LIMITS.maxTimestamp,
+    integer: true,
   });
   const lastKind = source.lastKind;
-  if (sent === null || ignored === null || lastAt === null ||
-      (lastKind !== null && lastKind !== "fit" && lastKind !== "cargo")) return null;
+  if (
+    sent === null ||
+    ignored === null ||
+    lastAt === null ||
+    (lastKind !== null && lastKind !== "fit" && lastKind !== "cargo")
+  )
+    return null;
   return { sent, ignored, lastAt, lastKind };
 }
 
 export function parseClipboardResult(value: unknown): ClipboardResult | null {
   const source = plainRecord(value);
-  if (!source || !hasOnlyKeys(source, [
-    "on", "stats", "vocabulary", "ignored", "sentKind", "delivered", "error",
-  ]) || typeof source.on !== "boolean") return null;
+  if (
+    !source ||
+    !hasOnlyKeys(source, [
+      "on",
+      "stats",
+      "vocabulary",
+      "ignored",
+      "sentKind",
+      "delivered",
+      "error",
+    ]) ||
+    typeof source.on !== "boolean"
+  )
+    return null;
   const stats = parseClipboardStats(source.stats);
   if (!stats) return null;
   const result: ClipboardResult = { on: source.on, stats };
   if (source.vocabulary !== undefined) {
     const vocabulary = boundedNumber(source.vocabulary, {
-      minimum: 0, maximum: VALIDATION_LIMITS.vocabularyEntries, integer: true,
+      minimum: 0,
+      maximum: VALIDATION_LIMITS.vocabularyEntries,
+      integer: true,
     });
     if (vocabulary === null) return null;
     result.vocabulary = vocabulary;
@@ -609,14 +716,20 @@ export function parseClipboardResult(value: unknown): ClipboardResult | null {
     result.sentKind = source.sentKind;
   }
   if (source.delivered !== undefined) {
-    const delivered = source.delivered === null ? null : boundedNumber(source.delivered, {
-      minimum: 0, maximum: Number.MAX_SAFE_INTEGER, integer: true,
-    });
+    const delivered =
+      source.delivered === null
+        ? null
+        : boundedNumber(source.delivered, {
+            minimum: 0,
+            maximum: Number.MAX_SAFE_INTEGER,
+            integer: true,
+          });
     if (delivered === null && source.delivered !== null) return null;
     result.delivered = delivered;
   }
   if (source.error !== undefined) {
-    if (source.error !== null && boundedString(source.error, VALIDATION_LIMITS.label) === null) return null;
+    if (source.error !== null && boundedString(source.error, VALIDATION_LIMITS.label) === null)
+      return null;
     result.error = source.error as string | null;
   }
   return result;
@@ -637,9 +750,14 @@ export function parseBumpResult(value: unknown): BumpResult | null {
 
 export function parseViewerState(value: unknown): ViewerState | null {
   const source = plainRecord(value);
-  if (!source || !hasOnlyKeys(source, ["paired", "serverUrl", "opacity"]) ||
-      typeof source.paired !== "boolean" || boundedString(source.serverUrl, VALIDATION_LIMITS.url) === null ||
-      (source.opacity !== 0 && source.opacity !== 1 && source.opacity !== 2)) return null;
+  if (
+    !source ||
+    !hasOnlyKeys(source, ["paired", "serverUrl", "opacity"]) ||
+    typeof source.paired !== "boolean" ||
+    boundedString(source.serverUrl, VALIDATION_LIMITS.url) === null ||
+    (source.opacity !== 0 && source.opacity !== 1 && source.opacity !== 2)
+  )
+    return null;
   return { paired: source.paired, serverUrl: source.serverUrl as string, opacity: source.opacity };
 }
 
@@ -647,7 +765,9 @@ export function parseClipboardRelayResponse(value: unknown): ClipboardRelayRespo
   const source = plainRecord(value);
   if (!source) return null;
   const delivered = boundedNumber(source.delivered, {
-    minimum: 0, maximum: Number.MAX_SAFE_INTEGER, integer: true,
+    minimum: 0,
+    maximum: Number.MAX_SAFE_INTEGER,
+    integer: true,
   });
   return delivered === null ? null : { delivered };
 }

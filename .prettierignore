@@ -1,0 +1,9 @@
+.build/
+dist/
+node_modules/
+output/
+package-lock.json
+*.png
+*.ico
+*.exe
+IMPROVEMENTS.local.md

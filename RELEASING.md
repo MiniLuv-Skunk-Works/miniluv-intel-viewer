@@ -10,14 +10,14 @@ Goal: someone clicks one link, gets one file, double-clicks it, and it runs.
 
    ```
    npm install
-   npm run build
+   npm run verify
    ```
 
    You get `dist\MILF-Viewer-0.1.0.exe`, around 90 MB.
 
 2. On GitHub: **Releases** → **Draft a new release**
 
-3. **Choose a tag** → type `v0.1.0` → *Create new tag on publish*
+3. **Choose a tag** → type `v0.1.0` → _Create new tag on publish_
 
 4. Title it `MILF Viewer 0.1.0`. In the body, say what changed and warn about
    SmartScreen — see the template below.
@@ -65,11 +65,13 @@ exe isn't code-signed, not because anything is wrong.
 Click **More info** → **Run anyway**.
 
 ## Setup
+
 1. Open the dashboard and click **Pair viewer**
 2. In the viewer, enter the dashboard address and the code
 3. Scans appear as they're posted
 
 ## This release
+
 - ...
 ```
 
@@ -135,7 +137,7 @@ cert), a cloud HSM, or a managed service.
 ### The catch nobody mentions
 
 An OV (Organization Validation) certificate — the affordable kind — still shows
-a SmartScreen warning for a new publisher. It fades as download *reputation*
+a SmartScreen warning for a new publisher. It fades as download _reputation_
 accumulates. Thirty downloads will not accumulate reputation in any useful
 timeframe.
 
@@ -179,7 +181,7 @@ widely enough that reputation would actually build.
 
 ### It doesn't ask for a code again
 
-Fixed. The cause was that the pairing screen only appeared when the *server*
+Fixed. The cause was that the pairing screen only appeared when the _server_
 rejected the token. If a token was stored but the server was unreachable, the
 viewer sat on "reconnecting" forever with no way to reach pairing.
 
@@ -189,7 +191,7 @@ Now:
 - **Re-pair…** on the tray menu
 - a 401 or 403 clears the stored token immediately rather than retrying against
   a server that will never accept it
-- the pairing screen has a *back to the feed* link, so opening it by accident
+- the pairing screen has a _back to the feed_ link, so opening it by accident
   isn't a dead end
 
 ### npm install / rebuild fails, "it thinks it's running"

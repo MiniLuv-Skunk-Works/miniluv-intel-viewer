@@ -83,12 +83,25 @@ reaches end of life. Electron 43 reaches end of life on January 5, 2027. Patch
 and minor updates within the selected major are accepted through the package
 range and locked by `package-lock.json`.
 
-Type-check the application and tests, then run the portable test suite:
+Run the standard development checks and tests:
 
 ```powershell
-npm run typecheck
 npm test
 ```
+
+`npm test` runs the Node test suite and a serial real-Electron integration test
+against a local mock dashboard. The Electron test uses isolated application
+data, restores the host clipboard, and retains screenshots, traces, console
+output, and mock request logs under `output\playwright\` when it fails.
+
+Before publishing, run the complete Windows gate:
+
+```powershell
+npm run verify
+```
+
+This adds formatting, type-aware linting, TypeScript checking, portable
+packaging, and a launch/render/quit smoke test of the generated executable.
 
 Development, tests, and packaging compile TypeScript into the ignored
 `.build\` directory automatically. Generated JavaScript is disposable and
@@ -165,24 +178,30 @@ manual recovery steps.
 
 ## Project layout
 
-| Path | Purpose |
-| --- | --- |
-| `main.ts` | Electron lifecycle, pairing orchestration, tray, and clipboard polling |
-| `preload.ts` | Narrow, typed IPC bridge exposed to the sandboxed renderer |
-| `contracts.ts` | Shared IPC/domain types and runtime boundary parsers |
-| `dashboard-client.ts` | Bounded, cancellable JSON requests with normalized failures |
-| `feed-connection.ts` | Single-owner SSE connection, parsing, replay cursor/deduplication, idle detection, and jittered retry |
-| `dashboard-url.ts` | HTTPS and explicit loopback-development origin policy |
-| `credentials.ts` | OS-encrypted bearer credential storage and migration |
-| `settings-store.ts` | In-memory settings plus debounced, atomic JSON persistence |
-| `window-placement.ts` | Display-aware bounds capture, restoration, clamping, and Reset logic |
-| `ipc-security.ts` | Viewer-window and main-frame IPC authorization |
-| `validation.ts` | Central string, list, timestamp, and numeric bounds |
-| `renderer/` | TypeScript viewer interface, static HTML, icons, and live countdown behavior |
-| `clipboard-filter.ts` | Local, fail-closed fit and cargo classifier |
-| `tests/*.ts` | Portable behavior, security, clipboard, and contract checks |
-| `scripts/build-code.mjs` | Disposable esbuild production/test compilation |
-| `.github/workflows/` | PR, continuous, and stable release automation |
+| Path                     | Purpose                                                                                               |
+| ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `main.ts`                | Electron dependency composition, lifecycle, single-instance handling, and awaited shutdown            |
+| `viewer-controller.ts`   | Pairing, protocol, request/SSE, vocabulary, bump, unpair, and shutdown orchestration                  |
+| `clipboard-watcher.ts`   | Injected clipboard polling, local classification, vocabulary state, and capture statistics            |
+| `window-manager.ts`      | Hardened BrowserWindow, tray actions, renderer relay, and display-aware placement                     |
+| `ipc-handlers.ts`        | Typed IPC validation, main-frame authorization, registration, and cleanup                             |
+| `preload.ts`             | Narrow, typed IPC bridge exposed to the sandboxed renderer                                            |
+| `contracts.ts`           | Shared IPC/domain types and runtime boundary parsers                                                  |
+| `dashboard-client.ts`    | Bounded, cancellable JSON requests with normalized failures                                           |
+| `feed-connection.ts`     | Single-owner SSE connection, parsing, replay cursor/deduplication, idle detection, and jittered retry |
+| `dashboard-url.ts`       | HTTPS and explicit loopback-development origin policy                                                 |
+| `credentials.ts`         | OS-encrypted bearer credential storage and migration                                                  |
+| `settings-store.ts`      | In-memory settings plus debounced, atomic JSON persistence                                            |
+| `window-placement.ts`    | Display-aware bounds capture, restoration, clamping, and Reset logic                                  |
+| `ipc-security.ts`        | Viewer-window and main-frame IPC authorization                                                        |
+| `validation.ts`          | Central string, list, timestamp, and numeric bounds                                                   |
+| `renderer/`              | TypeScript viewer interface, static HTML, icons, and live countdown behavior                          |
+| `clipboard-filter.ts`    | Local, fail-closed fit and cargo classifier                                                           |
+| `tests/*.ts`             | Structured Node behavior, security, clipboard, contract, persistence, and network checks              |
+| `tests/e2e/`             | Real Electron flows and packaged-executable smoke coverage                                            |
+| `tests/support/`         | Reusable local mock dashboard with controllable HTTP and SSE behavior                                 |
+| `scripts/build-code.mjs` | Disposable esbuild production/test compilation                                                        |
+| `.github/workflows/`     | PR, continuous, and stable release automation                                                         |
 
 ## Security model
 

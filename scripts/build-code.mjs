@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -8,42 +8,41 @@ const outdir = path.join(root, ".build");
 const testsOnly = process.argv.includes("--tests");
 
 if (testsOnly) {
+  const testEntries = (await readdir(path.join(root, "tests"), { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && /^test-.*\.ts$/.test(entry.name))
+    .map((entry) => path.join("tests", entry.name));
   await build({
     absWorkingDir: root,
-    entryPoints: [
-      "tests/test-viewer.ts",
-      "tests/test-security.ts",
-      "tests/test-clipboard.ts",
-      "tests/test-contracts.ts",
-      "tests/test-dashboard-url.ts",
-      "tests/test-credentials.ts",
-      "tests/test-ipc-security.ts",
-      "tests/test-dashboard-client.ts",
-      "tests/test-feed-connection.ts",
-      "tests/test-renderer.ts",
-      "tests/test-settings-store.ts",
-      "tests/test-window-placement.ts"
-    ],
+    entryPoints: testEntries,
     outdir: path.join(outdir, "tests"),
     bundle: true,
     platform: "node",
     format: "cjs",
     target: "node22",
-    logLevel: "info"
+    sourcemap: "linked",
+    logLevel: "info",
   });
 } else {
   await rm(outdir, { recursive: true, force: true });
   await Promise.all([
     build({
       absWorkingDir: root,
-      entryPoints: ["main.ts", "preload.ts", "clipboard-filter.ts", "contracts.ts", "settings-store.ts", "window-placement.ts"],
+      entryPoints: [
+        "main.ts",
+        "preload.ts",
+        "clipboard-filter.ts",
+        "contracts.ts",
+        "settings-store.ts",
+        "window-placement.ts",
+      ],
       outdir,
       bundle: true,
       platform: "node",
       format: "cjs",
       target: "node24",
       external: ["electron"],
-      logLevel: "info"
+      sourcemap: "linked",
+      logLevel: "info",
     }),
     build({
       absWorkingDir: root,
@@ -53,7 +52,8 @@ if (testsOnly) {
       platform: "browser",
       format: "iife",
       target: "chrome150",
-      logLevel: "info"
-    })
+      sourcemap: "linked",
+      logLevel: "info",
+    }),
   ]);
 }
