@@ -1,78 +1,94 @@
-# Releasing MILF Viewer on GitHub
+# Releasing MILF Viewer
 
-Goal: someone clicks one link, gets one file, double-clicks it, and it runs.
+GitHub Actions is the only supported publication path. Stable releases are
+created from version tags, and pushes to `main` update a separate continuous
+prerelease. Do not create or upload a stable release manually in the GitHub UI.
 
----
+## Stable release procedure
 
-## The manual way, once
+1. Start from a clean branch based on `main`.
+2. Update `package.json` and `package-lock.json` to the intended version:
 
-1. Build it:
-
+   ```powershell
+   npm version <version> --no-git-tag-version
    ```
-   npm install
+
+3. Review both version-file changes and update user-facing release documentation when needed.
+4. Run the complete Windows gate:
+
+   ```powershell
+   npm ci
    npm run verify
    ```
 
-   You get `dist\MILF-Viewer-0.1.0.exe`, around 90 MB.
+5. Commit the version change, merge it to `main`, and confirm the `main` workflow succeeds.
+6. Tag the merged commit with exactly `v<version>` and push the tag:
 
-2. On GitHub: **Releases** → **Draft a new release**
+   ```powershell
+   git tag v<version>
+   git push origin v<version>
+   ```
 
-3. **Choose a tag** → type `v0.1.0` → _Create new tag on publish_
+The stable workflow fails before packaging if the tag does not equal `v` plus
+the `package.json` version or if the tagged commit is not reachable from
+`main`. The Windows build/test job has read-only repository access. Separate
+no-checkout jobs attest and publish the immutable build payload with only the
+permissions their operations require.
 
-4. Title it `MILF Viewer 0.1.0`. In the body, say what changed and warn about
-   SmartScreen — see the template below.
+## Stable release contents
 
-5. Drag the `.exe` into the **Attach binaries** box. Wait for the upload to
-   finish before publishing, or the release goes out with no download.
+A successful `v<version>` workflow creates a GitHub release containing:
 
-6. **Publish release.**
+- `MILF-Viewer-<version>.exe`
+- `MILF-Viewer-<version>.exe.sha256`
+- `MILF-Viewer-<version>.spdx.json`
+- GitHub-hosted build-provenance and SBOM attestations for the executable
 
-The download URL is then predictable, which is handy for pinning in Discord:
+GitHub generates release notes from the merged changes. Confirm that the
+release is present, all three downloadable assets exist, and the workflow's
+attestation jobs completed before sharing it.
 
-```
-https://github.com/<owner>/<repo>/releases/latest/download/MILF-Viewer-0.1.0.exe
-```
+## Continuous builds
 
-`/releases/latest/download/` always points at the newest release, so a link in
-a pinned message keeps working — **as long as the filename doesn't change**.
-That's an argument for dropping the version from the artifact name once you're
-past the first couple of releases.
+Every push to `main` also updates the `continuous` prerelease. Pull requests
+build and test the same portable executable but only retain it as a 14-day
+Actions artifact; pull-request code is never published as a release.
 
-## Automated builds
+The continuous prerelease replaces these stable-name assets:
 
-Pull requests build the portable executable and attach it to the workflow run
-as a 14-day Actions artifact. Unmerged code is never published as a release.
+- `MILF-Viewer-latest.exe`
+- `MILF-Viewer-latest.exe.sha256`
 
-Every push to `main` also updates the `continuous` prerelease and replaces
-`MILF-Viewer-latest.exe` and `MILF-Viewer-latest.exe.sha256`. Its permanent
-executable download URL is:
+Its permanent executable URL is:
 
-```
+```text
 https://github.com/MiniLuv-Skunk-Works/miniluv-intel-viewer/releases/download/continuous/MILF-Viewer-latest.exe
 ```
 
-Version tags create stable releases through `.github/workflows/release.yml`.
-The tag must exactly equal `v` plus the `package.json` version, and its commit
-must be reachable from `main`. A stable release contains the versioned `.exe`,
-its `.exe.sha256` manifest, and an SPDX JSON SBOM.
+Continuous builds are for early testing and are not a supported release line.
 
-### Verifying release artifacts
+## Verify release artifacts
 
-Download the executable and matching `.sha256` file into the same directory,
-then compare the expected and actual digest in PowerShell:
+Download the executable and matching `.sha256` file into the same directory.
+For a stable release, replace `<version>` below with the downloaded version; for
+a continuous build, use `MILF-Viewer-latest.exe`.
 
 ```powershell
-$download = "MILF-Viewer-0.4.0.exe"
+$download = "MILF-Viewer-<version>.exe"
 $expected = ((Get-Content "$download.sha256" -Raw) -split '\s+')[0]
 $actual = (Get-FileHash $download -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -cne $expected) { throw "SHA-256 checksum mismatch for $download" }
 ```
 
-The checksum manifest uses standard `sha256sum` syntax, so operators on Linux
-or in Git Bash can instead run `sha256sum --check <file>.sha256`.
+The checksum uses standard `sha256sum` syntax, so Linux and Git Bash users can
+instead run:
 
-Every published executable has GitHub-hosted build provenance. Stable
-executables also have a signed SPDX SBOM statement:
+```text
+sha256sum --check MILF-Viewer-<version>.exe.sha256
+```
+
+With the GitHub CLI installed, verify the repository, commit, workflow, and
+signed dependency statement:
 
 ```powershell
 gh attestation verify $download --repo MiniLuv-Skunk-Works/miniluv-intel-viewer
@@ -81,203 +97,26 @@ gh attestation verify $download `
   --predicate-type https://spdx.dev/Document/v2.3
 ```
 
-The first command identifies the repository, commit, and workflow that
-produced the file. The second validates the dependency statement. The readable
-`MILF-Viewer-<version>.spdx.json` release asset is retained alongside every
-stable executable for inspection and archival.
+Checksums and attestations establish integrity and provenance. They do not
+replace Windows Authenticode signing or suppress SmartScreen warnings.
 
----
+## Signing policy
 
-## Release notes template
+Releases are currently unsigned. Include a clear SmartScreen note in
+user-facing release communication and revisit signing if distribution grows or
+organizational policy requires it. Azure Artifact Signing or an open-source
+signing service can be evaluated at that time; credentials must remain in
+GitHub Actions secrets and never enter the repository.
 
-```markdown
-Download **MILF-Viewer-0.1.0.exe** below. No installer — double-click to run.
+Do not add automatic executable replacement until a future updater verifies
+signed metadata or an equivalent trusted release statement before installing
+an artifact.
 
-Windows will say "Windows protected your PC" the first time. That's because the
-exe isn't code-signed, not because anything is wrong.
-Click **More info** → **Run anyway**.
+## Failed release recovery
 
-## Setup
+Fix the underlying problem on a branch, merge the correction to `main`, and
+create a new patch version and tag. Do not move or force-update a published
+stable tag. Diagnostics from failed Windows tests are retained under the
+workflow run's `MILF-Viewer-test-diagnostics-<commit>` artifact when available.
 
-1. Open the dashboard and click **Pair viewer**
-2. In the viewer, enter the dashboard address and the code
-3. Scans appear as they're posted
-
-## This release
-
-- ...
-```
-
-Say the SmartScreen thing every time. People who skip it assume it's malware
-and quietly don't use the tool.
-
----
-
-## Automated stable releases
-
-The release workflow validates the tag and `main` ancestry before doing any
-expensive work. Its Windows build/test job has read-only repository access and
-hands an immutable artifact to separate no-checkout jobs. One job writes only
-GitHub attestations; the final job receives only the release-content permission
-needed to publish the already-built files. All external actions are pinned to
-immutable commit SHAs and maintained by Dependabot.
-
-After changing `package.json` and `package-lock.json` to the intended version,
-merging that commit to `main`, and passing the full verification gate, release
-it with a matching tag:
-
-```
-git tag v0.1.1
-git push origin v0.1.1
-```
-
-`runs-on: windows-latest` matters — electron-builder needs Windows to produce a
-Windows exe. `npm ci` rather than `npm install` ensures the build uses the exact
-locked versions. A mismatched tag or a tag pointing outside `main` fails before
-packaging and cannot publish a release.
-
----
-
-## Signing, and whether it's worth it
-
-Short version: **signing no longer makes the warning disappear on its own, and
-for a tool 30 people download it probably isn't worth paying for.** Here's why.
-
-### What changed
-
-The CA/Browser Forum now requires every code signing key to live on a
-FIPS-compliant hardware token or HSM. The old workflow — buy a cert, get a
-`.pfx`, sign with it — is gone. You need a USB token ($90-250 on top of the
-cert), a cloud HSM, or a managed service.
-
-### The catch nobody mentions
-
-An OV (Organization Validation) certificate — the affordable kind — still shows
-a SmartScreen warning for a new publisher. It fades as download _reputation_
-accumulates. Thirty downloads will not accumulate reputation in any useful
-timeframe.
-
-So paying for an OV cert may buy you a slightly different warning, not no
-warning. That's the part worth knowing before spending money.
-
-### If you do want to sign
-
-**Azure Artifact Signing** (renamed from Trusted Signing in 2026) is the
-cheapest sane option at roughly **$10/month**. No hardware, and certificates
-come from Microsoft's own CA which Windows already trusts, so reputation starts
-from a better place than a third-party OV cert. electron-builder supports it
-natively:
-
-```json
-"win": {
-  "sign": { "type": "azure" }
-}
-```
-
-Credentials come from Azure Entra ID environment variables — set them as GitHub
-Actions secrets, never in the repo.
-
-Eligibility is the snag: verified US, Canadian, EU or UK businesses and
-self-employed individuals, and some applicants need three years of trading
-history. You're US-based, so it's plausible — worth checking before budgeting
-for it.
-
-**If the repo is public**, SignPath offers free signing for open-source
-projects. Worth an application before paying anyone.
-
-### What I'd actually do
-
-Ship unsigned, and put the SmartScreen note in every release body. It's one
-extra click for the user, and it's honest. Revisit if MiniLuv ever distributes
-widely enough that reputation would actually build or organizational policy
-requires signing. Checksums, provenance, and SBOM attestations establish a
-verification path but do not replace Authenticode. Do not add automatic
-executable replacement unless a future update design verifies signed metadata
-or equivalent trusted release information before installation.
-
----
-
-## Two things you hit
-
-### It doesn't ask for a code again
-
-Fixed. The cause was that the pairing screen only appeared when the _server_
-rejected the token. If a token was stored but the server was unreachable, the
-viewer sat on "reconnecting" forever with no way to reach pairing.
-
-Now:
-
-- **re-pair** button in the header, always available
-- **Re-pair…** on the tray menu
-- a 401 or 403 clears the stored token immediately rather than retrying against
-  a server that will never accept it
-- the pairing screen has a _back to the feed_ link, so opening it by accident
-  isn't a dead end
-
-### npm install / rebuild fails, "it thinks it's running"
-
-It was. Two causes, both fixed:
-
-- The window closing didn't end the process. With a tray icon present, Electron
-  keeps running with no visible window — so you had an invisible process
-  holding its unpacked temp directory, and `npm run build` couldn't overwrite
-  `dist\`.
-- No single-instance lock, so every launch added another one.
-
-Now closing the window quits, the tray is destroyed on quit, and a second
-launch focuses the existing window instead of starting a rival.
-
-**To clear the ones already stuck**, in PowerShell:
-
-```powershell
-taskkill /IM "MILF Viewer.exe" /F
-taskkill /IM electron.exe /F
-```
-
-Then delete `dist\` and rebuild. If `npm install` still fails on
-`node_modules`, close any editor with the folder open — VS Code's file watcher
-holds handles on Windows.
-EOF
-mv /tmp/mkrelease.md /dev/null 2>/dev/null; echo written
-
----
-
-## Never commit node_modules
-
-GitHub Desktop will offer to commit it. Decline. `node_modules/electron/dist/electron.exe`
-alone is over 100 MB, which is GitHub's hard per-file limit — and the whole
-folder is ~300 MB that gets rebuilt from `package-lock.json` anyway.
-
-**Git LFS is not the answer either.** LFS exists for large files you genuinely
-need versioned — art assets, sample data. A dependency you can reinstall in
-thirty seconds isn't one, and LFS has its own storage quota you'd be burning
-for nothing.
-
-The repo should be about 350 KB:
-
-```
-.github/workflows/release.yml
-build/icon.ico  build/icon.png
-renderer/index.html  renderer/icon.png  renderer/icon-256.png
-main.ts  preload.ts  contracts.ts  clipboard-filter.ts  renderer/app.ts
-tests/*.ts  scripts/build-code.mjs  tsconfig.json
-package.json  package-lock.json  .gitignore  BUILD.md  RELEASING.md
-```
-
-**Do commit `package-lock.json`.** `npm ci` in the release workflow needs it,
-and it's what pins the exact dependency versions your build was tested against.
-
-### If you already committed it
-
-Not yet pushed:
-
-```
-git rm -r --cached node_modules dist
-git commit -m "stop tracking node_modules and dist"
-```
-
-Already pushed: the objects are in history and the clone stays large even after
-you delete the files. Either accept it, or rewrite history with
-`git filter-repo --path node_modules --invert-paths` and force-push. On a repo
-this young with no other contributors, rewriting is painless — do it now rather
-than later.
+For local packaging and locked-file problems, follow [BUILD.md](BUILD.md).
