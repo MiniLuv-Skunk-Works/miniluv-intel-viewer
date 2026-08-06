@@ -50,7 +50,7 @@ ok("levels are visibly different", (function () {
   return a.length === 3 && Math.max(...a) - Math.min(...a) >= 12;
 })(), "the accessible levels should still be visibly distinct");
 ok("cycles on click", /applyOpacity\(\(\(opLevel \+ 1\) % 3\) as OpacityLevel\)/.test(html));
-ok("preference is persisted", /handleIpc\("opacity"/.test(main) && /save\(\{ opacity/.test(main));
+ok("preference is persisted", /handleIpc\("opacity"/.test(main) && /settingsStore\.scheduleSave\(\{ opacity/.test(main));
 ok("restored on launch", /applyOpacity\(state\.opacity/.test(html));
 ok("background only, not the whole window",
    !/win\.setOpacity\(/.test(main.replace(/\/\/.*/g, "")),
@@ -105,7 +105,7 @@ ok("timer comes from the feed, not the POST response",
 ok("cleared bumps hide the row", /onBumpCleared/.test(html) && /rendered\.bumpRow\.hidden = true/.test(html));
 
 console.log("\n=== clipboard watching ===");
-ok("off by default", !/watchClipboard: true/.test(main) && /load\(\)\.watchClipboard/.test(main),
+ok("off by default", !/watchClipboard: true/.test(main) && /settingsStore\.get\(\)\.watchClipboard/.test(main),
    "reading someone's clipboard is not a thing to switch on for them");
 ok("filtered before anything is sent", /classify\(text, vocabulary\)/.test(main) && /if \(!clip\)/.test(main),
    "rejects must never reach the network");

@@ -19,6 +19,7 @@ import {
   parseScan,
   parseScanId,
   parseSettings,
+  parseSettingsDocument,
   parseViewerState,
   parseViewerReplayMetadata,
   parseVocabulary,
@@ -47,14 +48,31 @@ const settings = parseSettings({
   y: 20,
   width: 380,
   height: 460,
+  windowPlacement: {
+    bounds: { x: -1200, y: 40, width: 380, height: 460 },
+    displayId: 2,
+    workArea: { x: -1280, y: 0, width: 1280, height: 1024 },
+    scaleFactor: 1.25,
+  },
   opacity: 2,
   watchClipboard: true,
   unexpected: "discard me",
 });
 ok("known settings survive", settings.serverUrl === "https://dashboard.example" && settings.opacity === 2);
+ok("display-aware placement survives validation",
+  settings.windowPlacement?.displayId === 2 && settings.windowPlacement.workArea.x === -1280);
 ok("unknown settings are discarded", !("unexpected" in settings));
 ok("invalid settings object fails closed", Object.keys(parseSettings(["not", "settings"])).length === 0);
+ok("stored settings documents reject non-object roots", parseSettingsDocument([]) === null);
 ok("invalid individual settings are omitted", parseSettings({ width: Infinity, opacity: 9 }).width === undefined);
+ok("malformed placement is omitted", parseSettings({
+  windowPlacement: {
+    bounds: { x: 0, y: 0, width: Infinity, height: 460 },
+    displayId: 1,
+    workArea: { x: 0, y: 0, width: 1920, height: 1040 },
+    scaleFactor: 1,
+  },
+}).windowPlacement === undefined);
 ok("invalid legacy credentials are marked for removal", parseSettings({ token: "x".repeat(8_193) }).token === null);
 
 console.log("\n=== IPC request and result boundaries ===");

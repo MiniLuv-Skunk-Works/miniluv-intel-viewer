@@ -12,7 +12,7 @@
     "prestart": "npm run build:code",
     "start": "electron .",
     "pretest": "npm run build:code && npm run build:tests",
-    "test": "node .build/tests/test-viewer.js && node .build/tests/test-security.js && node .build/tests/test-clipboard.js && node .build/tests/test-contracts.js && node .build/tests/test-dashboard-url.js && node .build/tests/test-credentials.js && node .build/tests/test-ipc-security.js && node .build/tests/test-dashboard-client.js && node .build/tests/test-feed-connection.js && node .build/tests/test-renderer.js",
+    "test": "node .build/tests/test-viewer.js && node .build/tests/test-security.js && node .build/tests/test-clipboard.js && node .build/tests/test-contracts.js && node .build/tests/test-dashboard-url.js && node .build/tests/test-credentials.js && node .build/tests/test-ipc-security.js && node .build/tests/test-dashboard-client.js && node .build/tests/test-feed-connection.js && node .build/tests/test-renderer.js && node .build/tests/test-settings-store.js && node .build/tests/test-window-placement.js",
     "prebuild": "npm run build:code",
     "build": "electron-builder --win --publish never"
   },

@@ -44,7 +44,7 @@ console.log("\n=== the bridge is the only way out, and it is narrow ===");
 const exposed = [...main.matchAll(/handleIpc\("(\w+)"/g)].map(x => x[1]);
 console.log("    reachable from the renderer: " + exposed.join(", "));
 ok("no shell access exposed", !/shell\./.test(main));
-// Only the ipcMain.handle bodies are reachable from page script; save() and
+// Only the ipcMain.handle bodies are reachable from page script; the settings store and
 // the SSE client are main-process code the renderer cannot invoke.
 const handlerBodies = [...main.matchAll(/handleIpc\("(\w+)",[\s\S]*?\n\}\);/g)]
   .map(x => x[0]).join("\n");
@@ -52,7 +52,7 @@ ok("no process spawning reachable from the renderer",
    !/child_process|spawn\(|execFile|exec\(/.test(handlerBodies));
 ok("no arbitrary filesystem write reachable from the renderer",
    !/writeFileSync\(|unlink|rmSync/.test(handlerBodies),
-   "settings are written by save(), which takes no renderer-supplied path");
+   "the settings store owns a fixed main-process path");
 const stateBody = (main.match(/handleIpc\("state"[\s\S]*?\n\}\);/) || [""])[0] ?? "";
 ok("state() reports pairing as a boolean, never the token itself",
    /paired: !!credentials\?\.get\(\)/.test(stateBody) && !/token: /.test(stateBody),
@@ -61,8 +61,8 @@ ok("credentials use asynchronous OS storage",
    /CredentialStore/.test(main) && /safeStorage/.test(main) && /credential\.bin/.test(main));
 ok("settings token is migration-only and removed",
    /credentials\.initialize\(settings\.token\)/.test(main) &&
-   /initialized\.removeLegacyToken\) save\(\{\}, \["token"\]\)/.test(main) &&
-   !/save\(\{[^}]*token:/.test(main));
+   /initialized\.removeLegacyToken\) await settingsStore\.saveNow\(\{\}, \["token"\]\)/.test(main) &&
+   !/settingsStore\.(?:saveNow|scheduleSave)\(\{[^}]*token:/.test(main));
 ok("authentication expiry clears encrypted credentials",
    /status === 401 \|\| status === 403[\s\S]{0,180}onUnauthorized\(\)/.test(feedConnection) &&
    /async function expirePairing[\s\S]{0,220}credentials\?\.clear\(\)/.test(main));

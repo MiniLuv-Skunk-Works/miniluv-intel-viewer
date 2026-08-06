@@ -36,15 +36,32 @@ export type ProtocolCompatibility =
   | "limited-capability"
   | "newer-protocol";
 
+export interface StoredRectangle {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface WindowPlacement {
+  bounds: StoredRectangle;
+  displayId: number;
+  workArea: StoredRectangle;
+  scaleFactor: number;
+}
+
 export interface Settings {
   serverUrl?: string | null;
   // Read only for one-time migration from releases that stored the bearer
   // token in settings.json. New credentials live in credential.bin.
   token?: string | null;
+  // Read only for migration from releases that stored flat window bounds.
+  // New saves use windowPlacement so the display context is retained.
   x?: number;
   y?: number;
   width?: number;
   height?: number;
+  windowPlacement?: WindowPlacement;
   opacity?: OpacityLevel;
   watchClipboard?: boolean;
 }
@@ -255,6 +272,34 @@ function optionalNumber(source: UnknownRecord, key: ScanNumberKey, target: Scan)
   return true;
 }
 
+function parseStoredRectangle(value: unknown, minimumSize: number): StoredRectangle | null {
+  const source = plainRecord(value);
+  if (!source || !hasOnlyKeys(source, ["x", "y", "width", "height"])) return null;
+  const x = boundedNumber(source.x, { minimum: -1_000_000, maximum: 1_000_000, integer: true });
+  const y = boundedNumber(source.y, { minimum: -1_000_000, maximum: 1_000_000, integer: true });
+  const width = boundedNumber(source.width, { minimum: minimumSize, maximum: 100_000, integer: true });
+  const height = boundedNumber(source.height, { minimum: minimumSize, maximum: 100_000, integer: true });
+  return x !== null && y !== null && width !== null && height !== null
+    ? { x, y, width, height }
+    : null;
+}
+
+function parseWindowPlacement(value: unknown): WindowPlacement | null {
+  const source = plainRecord(value);
+  if (!source || !hasOnlyKeys(source, ["bounds", "displayId", "workArea", "scaleFactor"])) return null;
+  const bounds = parseStoredRectangle(source.bounds, 100);
+  const workArea = parseStoredRectangle(source.workArea, 1);
+  const displayId = boundedNumber(source.displayId, {
+    minimum: -10,
+    maximum: Number.MAX_SAFE_INTEGER,
+    integer: true,
+  });
+  const scaleFactor = boundedNumber(source.scaleFactor, { minimum: 0.1, maximum: 16 });
+  return bounds && workArea && displayId !== null && scaleFactor !== null
+    ? { bounds, displayId, workArea, scaleFactor }
+    : null;
+}
+
 export function parseSettings(value: unknown): Settings {
   const source = plainRecord(value);
   if (!source) return {};
@@ -269,9 +314,15 @@ export function parseSettings(value: unknown): Settings {
       : { minimum: 100, maximum: 10_000, integer: true });
     if (number !== null) settings[key] = number;
   }
+  const windowPlacement = parseWindowPlacement(source.windowPlacement);
+  if (windowPlacement) settings.windowPlacement = windowPlacement;
   if (source.opacity === 0 || source.opacity === 1 || source.opacity === 2) settings.opacity = source.opacity;
   if (typeof source.watchClipboard === "boolean") settings.watchClipboard = source.watchClipboard;
   return settings;
+}
+
+export function parseSettingsDocument(value: unknown): Settings | null {
+  return plainRecord(value) ? parseSettings(value) : null;
 }
 
 export function parsePairRequest(value: unknown): PairRequest | null {

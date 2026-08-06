@@ -25,7 +25,11 @@ target machine does not need Node.js.
 
 The viewer remembers its dashboard address, encrypted pairing credential,
 window position, and opacity under `%APPDATA%\milf-viewer`. Use **Re-pair** in
-the header or tray menu to connect it to a different dashboard.
+the header or tray menu to connect it to a different dashboard. Settings and
+the clipboard vocabulary cache are replaced atomically; an unreadable file is
+retained with a `.corrupt-<timestamp>` name for diagnosis. Saved window
+placement is tied to its display and clamped to an attached display when the
+monitor layout, resolution, or DPI changes.
 
 ## Features
 
@@ -170,6 +174,8 @@ manual recovery steps.
 | `feed-connection.ts` | Single-owner SSE connection, parsing, replay cursor/deduplication, idle detection, and jittered retry |
 | `dashboard-url.ts` | HTTPS and explicit loopback-development origin policy |
 | `credentials.ts` | OS-encrypted bearer credential storage and migration |
+| `settings-store.ts` | In-memory settings plus debounced, atomic JSON persistence |
+| `window-placement.ts` | Display-aware bounds capture, restoration, clamping, and Reset logic |
 | `ipc-security.ts` | Viewer-window and main-frame IPC authorization |
 | `validation.ts` | Central string, list, timestamp, and numeric bounds |
 | `renderer/` | TypeScript viewer interface, static HTML, icons, and live countdown behavior |

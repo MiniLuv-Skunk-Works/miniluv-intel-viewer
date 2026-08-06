@@ -20,7 +20,9 @@ if (testsOnly) {
       "tests/test-ipc-security.ts",
       "tests/test-dashboard-client.ts",
       "tests/test-feed-connection.ts",
-      "tests/test-renderer.ts"
+      "tests/test-renderer.ts",
+      "tests/test-settings-store.ts",
+      "tests/test-window-placement.ts"
     ],
     outdir: path.join(outdir, "tests"),
     bundle: true,
@@ -34,7 +36,7 @@ if (testsOnly) {
   await Promise.all([
     build({
       absWorkingDir: root,
-      entryPoints: ["main.ts", "preload.ts", "clipboard-filter.ts", "contracts.ts"],
+      entryPoints: ["main.ts", "preload.ts", "clipboard-filter.ts", "contracts.ts", "settings-store.ts", "window-placement.ts"],
       outdir,
       bundle: true,
       platform: "node",
