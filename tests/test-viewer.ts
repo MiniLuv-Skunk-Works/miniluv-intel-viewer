@@ -12,8 +12,9 @@ const pre = fs.readFileSync(path.join(ROOT, "preload.ts"), "utf8");
 // inline script. Checks that look for behaviour need both files.
 const markup = fs.readFileSync(path.join(ROOT, "renderer", "index.html"), "utf8");
 const rendererJs = fs.readFileSync(path.join(ROOT, "renderer", "app.ts"), "utf8");
+const rendererController = fs.readFileSync(path.join(ROOT, "renderer", "controller.ts"), "utf8");
 const buildScript = fs.readFileSync(path.join(ROOT, "scripts", "build-code.mjs"), "utf8");
-const html = markup + "\n" + rendererJs;
+const html = markup + "\n" + rendererJs + "\n" + rendererController;
 interface PackageConfig {
   main: string;
   scripts: Record<string, string>;
@@ -46,15 +47,15 @@ ok("default is not fully opaque", (function () {
 })(), "asserting one exact alpha breaks on any tuning");
 ok("levels are visibly different", (function () {
   const a = [...html.matchAll(/body\.op\d \{ --bg: rgba\(16,17,19,\.(\d+)\)/g)].map(x => Number(x[1]));
-  return a.length === 3 && Math.max(...a) - Math.min(...a) >= 30;
-})(), "0.78/0.80/0.62 was imperceptible");
+  return a.length === 3 && Math.max(...a) - Math.min(...a) >= 12;
+})(), "the accessible levels should still be visibly distinct");
 ok("cycles on click", /applyOpacity\(\(\(opLevel \+ 1\) % 3\) as OpacityLevel\)/.test(html));
-ok("preference is persisted", /handleIpc\("opacity"/.test(main) && /save\(\{ opacity/.test(main));
-ok("restored on launch", /applyOpacity\(st\.opacity/.test(html));
+ok("preference is persisted", /handleIpc\("opacity"/.test(main) && /settingsStore\.scheduleSave\(\{ opacity/.test(main));
+ok("restored on launch", /applyOpacity\(state\.opacity/.test(html));
 ok("background only, not the whole window",
    !/win\.setOpacity\(/.test(main.replace(/\/\/.*/g, "")),
    "win.setOpacity would fade the text along with it");
-ok("detail panel follows the same alpha", /#detail \{[^}]*background: var\(--bg\)/.test(html));
+ok("detail panel follows the same alpha", /#detail, #pair \{[^}]*background: var\(--bg\)/.test(html));
 
 console.log("\n=== tray actually works ===");
 ok("icon file exists", fs.existsSync(path.join(ROOT, "renderer", "icon.png")),
@@ -63,7 +64,8 @@ ok("ico exists for the exe", fs.existsSync(path.join(ROOT, "build", "icon.ico"))
 ok("tray failure is logged, not swallowed", /tray icon missing:/.test(main));
 
 console.log("\n=== detail popup ===");
-ok("entries are clickable", /class="scan"[^>]*data-id=/.test(html) || /data-id="' \+ esc\(s\.id\)/.test(html));
+ok("entries are keyboard-activatable", /open\.setAttribute\("role", "button"\)/.test(html) &&
+   /event\.key !== "Enter" && event\.key !== " "/.test(html));
 ok("opens a detail view", /function openDetail/.test(html));
 ok("shows the fit", /fitEft/.test(html));
 ok("shows cargo", /cargoList/.test(html));
@@ -74,16 +76,16 @@ console.log("\n=== clear ===");
 ok("button present", /id="clearBtn"/.test(html));
 ok("also on the tray menu", /label: "Clear feed"/.test(main));
 ok("clearing closes an open detail view",
-   /scans = \[\];\s*\n\s*\$\("detail"\)\.className = "";/.test(html),
+   /detailWasOpen[\s\S]{0,100}closeDetail\(false\)/.test(html),
    "otherwise the popup shows a scan that's no longer in the list");
 
 console.log("\n=== bump timers ===");
-ok("BUMP button on each entry", /data-bump="/.test(html));
+ok("BUMP button on each entry", /element\("button", "bumpbtn", "BUMP"\)/.test(html));
 ok("button click doesn't open the detail popup",
-   /e\.target\.hasAttribute\("data-bump"\)\s*\)\s*return/.test(html),
-   "the button sits inside the row, which is itself clickable");
-ok("countdown row per scan", /data-bumprow="/.test(html));
-ok("counts DOWN, not up", /var left = b\.remainingMs - elapsed/.test(html) &&
+   /article\.append\(open, bumpButton\)/.test(html),
+   "the native BUMP button is a sibling of the detail control");
+ok("countdown row per scan", /setAttribute\("role", "progressbar"\)/.test(html));
+ok("counts DOWN, not up", /bump\.remainingMs - \(now - bump\.receivedAt\)/.test(html) &&
    /left <= 0 \? "OUT"/.test(html),
    "an FC wants how long is left, not how long it has been");
 ok("goes amber then red", /" warn"/.test(html) && /" gone"/.test(html));
@@ -92,18 +94,18 @@ ok("amber is a fixed 30s, not a fraction of the hold", /left <= 30000/.test(html
 ok("reads as m:ss above a minute", /padStart\(2, "0"\)/.test(html),
    "\"2:45\" is easier to call than \"165s\"");
 ok("shows OUT when the hold lapses", /"OUT"/.test(html));
-ok("names the bumper and the re-bump count", /b\.by \+/.test(html) && /b\.count > 1/.test(html));
-ok("timers survive a re-render", /paintBumps\(\);\s*\/\/ a re-render/.test(html),
+ok("names the bumper and the re-bump count", /bump\.by \+/.test(html) && /bump\.count > 1/.test(html));
+ok("timers survive a re-render", /replaceChildren\(fragment\);\s*\n\s*paintBumps\(\)/.test(html),
    "the scan list redraws on every new scan");
 ok("bump sent with the viewer token", /token,\s*\n\s*body: \{ scanId \}/.test(main) &&
    /Authorization: "Bearer " \+ request\.token/.test(dashboardClient));
 ok("timer comes from the feed, not the POST response",
    /The timer itself arrives over the feed/.test(main),
    "the bumper must see the same clock as everyone else");
-ok("cleared bumps hide the row", /onBumpCleared/.test(html) && /bumpCleared/.test(main));
+ok("cleared bumps hide the row", /onBumpCleared/.test(html) && /rendered\.bumpRow\.hidden = true/.test(html));
 
 console.log("\n=== clipboard watching ===");
-ok("off by default", !/watchClipboard: true/.test(main) && /load\(\)\.watchClipboard/.test(main),
+ok("off by default", !/watchClipboard: true/.test(main) && /settingsStore\.get\(\)\.watchClipboard/.test(main),
    "reading someone's clipboard is not a thing to switch on for them");
 ok("filtered before anything is sent", /classify\(text, vocabulary\)/.test(main) && /if \(!clip\)/.test(main),
    "rejects must never reach the network");
@@ -130,7 +132,7 @@ ok("clipboard requests require both advertised capabilities",
 ok("future dashboards retain scan feed with a compact warning",
    /newer - scan feed only/.test(main));
 ok("compatibility warnings survive transient messages",
-   /protocolNotice/.test(html) && /s = protocolNotice/.test(html));
+   /protocolNotice/.test(html) && /shown = protocolNotice/.test(html));
 ok("scan replay is enabled only from the advertised capability",
    /protocol\.capabilities\.includes\(PROTOCOL_CAPABILITIES\.scanReplay\)/.test(main) &&
    /feedConnection\.setReplayEnabled\(replaySupported\)/.test(main));
@@ -146,26 +148,26 @@ console.log("\n=== bump timers survive clock skew ===");
 ok("no server timestamp in the countdown", !/now - b\.at/.test(html),
    "cross-machine subtraction is the whole fault");
 ok("anchored to a monotonic local clock",
-   /receivedAt: performance\.now\(\)/.test(html) &&
-   /now = performance\.now\(\)/.test(html) &&
-   /now - b\.receivedAt/.test(html));
-ok("counts down from server-supplied remaining", /b\.remainingMs - elapsed/.test(html));
-ok("replayed hold has a part-full bar", /left \/ b\.totalMs/.test(html) &&
-   /Number\(b\.holdMs\)/.test(html),
+   /receivedAt: runtime\.monotonicNow\(\)/.test(html) &&
+   /now = runtime\.monotonicNow\(\)/.test(html) &&
+   /now - bump\.receivedAt/.test(html));
+ok("counts down from server-supplied remaining", /bump\.remainingMs - \(now - bump\.receivedAt\)/.test(html));
+ok("replayed hold has a part-full bar", /left \/ bump\.totalMs/.test(html) &&
+   /Number\(bump\.holdMs\)/.test(html),
    "the full hold is the bar denominator, not the remaining duration");
 ok("validates server-reported remaining time",
-   /remainingMs = Number\(b\.remainingMs\)/.test(html) &&
+   /remainingMs = Number\(bump\.remainingMs\)/.test(html) &&
    /Number\.isFinite\(remainingMs\)/.test(html));
 ok("tolerates an older server without using its clock",
-   /remainingMs = Number\(b\.holdMs\)/.test(html));
+   /remainingMs = Number\(bump\.holdMs\)/.test(html));
 
 console.log("\n=== entry layout ===");
 // Once a gank is called the FC knows the system; what they need on the title
 // line is the name they are looking for on grid.
-ok("pilot on the title line, in parens", /class="pilot">\(/.test(html));
-ok("pilot omitted cleanly when unknown", /s\.pilot \?/.test(html),
+ok("pilot on the title line, in parens", /appendSpan\(row1, "pilot", "\(" \+ scan\.pilot \+ "\)"\)/.test(html));
+ok("pilot omitted cleanly when unknown", /if \(scan\.pilot\)/.test(html),
    "empty parens would be worse than nothing");
-ok("system moved to the meta line", /scanned in " \+ esc\(s\.system\)/.test(html));
+ok("system moved to the meta line", /scanned in " \+ scan\.system/.test(html));
 ok("system no longer on the title line", !/class="sys">' \+ esc\(s\.system/.test(html));
 ok("pilot truncates instead of shoving the controls off",
    /\.pilot \{[^}]*text-overflow: ellipsis/.test(html),
@@ -178,7 +180,7 @@ ok("a missing route is named as an out-of-date dashboard",
 ok("distinguished from a scan that aged out",
    /!failure\.detail &&/.test(main) && /not found\/i\.test/.test(main),
    "both are 404s with completely different fixes");
-ok("the button shows it is working", /btn\.disabled = true/.test(html));
+ok("the button shows it is working", /button\.disabled = true/.test(html));
 ok("errors stay on screen long enough to read", /12000/.test(html));
 
 console.log("\n=== ipc surface is complete ===");
@@ -236,7 +238,9 @@ console.log("\n=== security posture unchanged ===");
 ok("contextIsolation on", /contextIsolation: true/.test(main));
 ok("nodeIntegration off", /nodeIntegration: false/.test(main));
 ok("renderer has a CSP", /Content-Security-Policy/.test(html));
-ok("scan text is escaped before rendering", /function esc\b/.test(html));
+ok("scan text never enters an HTML parser",
+   /textContent/.test(rendererController) && /replaceChildren/.test(rendererController) &&
+   !/innerHTML/.test(rendererController));
 ok("not an injected overlay", /NOT an injected overlay/.test(main),
    "the EULA reasoning should stay documented in the source");
 

@@ -23,7 +23,10 @@ unpacks to a temp directory and starts. Non-secret settings (server address,
 window position, opacity, and clipboard preference) go in
 `%APPDATA%\milf-viewer\settings.json`. The bearer credential is encrypted with
 Electron `safeStorage` into `credential.bin`; an older plaintext settings token
-is migrated and removed on the next successful startup.
+is migrated and removed on the next successful startup. Settings and the
+vocabulary cache are written by atomic replacement. If either JSON file is
+malformed, the original is retained beside it with a `.corrupt-<timestamp>`
+name before a fresh file is created.
 
 **Windows SmartScreen will warn on first run** — "Windows protected your PC" —
 because the exe isn't code-signed. More Info → Run anyway. Signing needs a
@@ -66,6 +69,10 @@ After `npm run build`, close any development copy and launch
 9. The packaged renderer still reports `contextIsolation: true`, `nodeIntegration: false`, and `sandbox: true` in its compiled main-process configuration.
 10. Disconnecting the dashboard changes the viewer to reconnecting within the bounded timeout, and restoring it resumes a single live feed.
 11. Rapidly pairing to another dashboard never reconnects to or displays events from the previous dashboard.
+12. Move and resize the viewer rapidly, select Quit immediately, then relaunch and confirm the final bounds were retained.
+13. Place the viewer on a secondary monitor, including one with negative desktop coordinates, and confirm it reopens on that display.
+14. Change that display's resolution or DPI, or unplug it, and confirm the running and relaunched viewer remain fully reachable.
+15. Use Reset position while the viewer is on both primary and secondary displays and confirm it resets within the nearest display's work area.
 
 The pairing, live-feed, bump, and clipboard checks require a compatible
 dashboard. If one is unavailable, record those items as not exercised rather

@@ -6,6 +6,7 @@ import {
   negotiateProtocol,
   parseBumpClearedEvent,
   parseBumpEvent,
+  parseBumpResponse,
   parseClaimResponse,
   parseClipboardRelayResponse,
   parseClipboardResult,
@@ -18,6 +19,7 @@ import {
   parseScan,
   parseScanId,
   parseSettings,
+  parseSettingsDocument,
   parseViewerState,
   parseViewerReplayMetadata,
   parseVocabulary,
@@ -46,14 +48,31 @@ const settings = parseSettings({
   y: 20,
   width: 380,
   height: 460,
+  windowPlacement: {
+    bounds: { x: -1200, y: 40, width: 380, height: 460 },
+    displayId: 2,
+    workArea: { x: -1280, y: 0, width: 1280, height: 1024 },
+    scaleFactor: 1.25,
+  },
   opacity: 2,
   watchClipboard: true,
   unexpected: "discard me",
 });
 ok("known settings survive", settings.serverUrl === "https://dashboard.example" && settings.opacity === 2);
+ok("display-aware placement survives validation",
+  settings.windowPlacement?.displayId === 2 && settings.windowPlacement.workArea.x === -1280);
 ok("unknown settings are discarded", !("unexpected" in settings));
 ok("invalid settings object fails closed", Object.keys(parseSettings(["not", "settings"])).length === 0);
+ok("stored settings documents reject non-object roots", parseSettingsDocument([]) === null);
 ok("invalid individual settings are omitted", parseSettings({ width: Infinity, opacity: 9 }).width === undefined);
+ok("malformed placement is omitted", parseSettings({
+  windowPlacement: {
+    bounds: { x: 0, y: 0, width: Infinity, height: 460 },
+    displayId: 1,
+    workArea: { x: 0, y: 0, width: 1920, height: 1040 },
+    scaleFactor: 1,
+  },
+}).windowPlacement === undefined);
 ok("invalid legacy credentials are marked for removal", parseSettings({ token: "x".repeat(8_193) }).token === null);
 
 console.log("\n=== IPC request and result boundaries ===");
@@ -105,6 +124,10 @@ ok("scan rejects unsafe and negative numbers", parseScan({ id: "bad", at: -1 }) 
 const bump = parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 2, holdMs: 180000, remainingMs: 90000, future: true });
 ok("valid bump parses", bump?.remainingMs === 90000);
 ok("legacy bump without remaining parses", parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 1, holdMs: 180000 }) !== null);
+ok("dashboard bump response parses as an event", parseBumpResponse({
+  scanId: "scan-1", at: 1_700_000_000_000, by: "pilot", count: 1, holdMs: 180000,
+})?.scanId === "scan-1");
+ok("IPC acknowledgement is not a dashboard bump response", parseBumpResponse({ ok: true }) === null);
 ok("bump rejects malformed duration", parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 1, holdMs: "never" }) === null);
 ok("bump rejects out-of-range values", parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 0, holdMs: 1 }) === null &&
    parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 1, holdMs: 86_400_001 }) === null);
@@ -226,6 +249,8 @@ ok("fixture hello matches protocol v1", fixtureHello?.protocolVersion === 1 &&
    negotiateProtocol(fixtureHello).compatibility === "fully-compatible");
 ok("fixture scan parses", parseScan(eventValue(fixture, ["scan", "scanEvent"])) !== null);
 ok("fixture bump event parses", parseBumpEvent(eventValue(fixture, ["bumpEvent", "bump"])) !== null);
+const fixtureApiResponses = asRecord(asRecord(fixture)?.apiResponses);
+ok("fixture bump API response parses", parseBumpResponse(response(fixtureApiResponses?.bump)) !== null);
 ok("fixture bump-cleared event parses", parseBumpClearedEvent(eventValue(fixture, ["bumpCleared", "bumpClearedEvent"])) !== null);
 ok("fixture pairing response parses", parseClaimResponse(response(namedValue(fixture,
    ["pairingClaim", "claim", "claimResponse", "pairingResponse"]))) !== null);

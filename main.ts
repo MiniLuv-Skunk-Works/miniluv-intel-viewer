@@ -12,7 +12,6 @@
 import { app, BrowserWindow, ipcMain, screen, Tray, Menu, clipboard, safeStorage } from "electron";
 import type { IpcMainInvokeEvent } from "electron";
 import * as path from "node:path";
-import * as fs from "node:fs";
 import { URL } from "node:url";
 import { classify } from "./clipboard-filter";
 import { CredentialStore } from "./credentials";
@@ -20,10 +19,18 @@ import { DashboardClient, type DashboardRequestFailure } from "./dashboard-clien
 import { parseDashboardOrigin, type DashboardOriginResult } from "./dashboard-url";
 import { FeedConnectionManager, type SseMessage } from "./feed-connection";
 import { runAuthorizedIpc } from "./ipc-security";
+import { AtomicJsonFile, SettingsStore } from "./settings-store";
+import {
+  captureWindowPlacement,
+  legacyBounds,
+  resetWindowBounds,
+  restoreWindowBounds,
+  type DisplayGeometry,
+} from "./window-placement";
 import {
   parseBumpClearedEvent,
   parseBumpEvent,
-  parseBumpResult,
+  parseBumpResponse,
   parseClaimResponse,
   parseClipboardRelayResponse,
   parseClipWatchRequest,
@@ -35,7 +42,7 @@ import {
   parseScan,
   parseScanId,
   parseServerError,
-  parseSettings,
+  parseSettingsDocument,
   parseVocabulary,
   type BumpResult,
   type ClipboardCapture,
@@ -48,7 +55,6 @@ import {
   type PairResult,
   type KnownCapability,
   type ProtocolNegotiation,
-  type Settings,
   type ViewerState,
   type Vocabulary,
   PROTOCOL_CAPABILITIES,
@@ -56,6 +62,7 @@ import {
 
 const STORE = path.join(app.getPath("userData"), "settings.json");
 const CREDENTIAL_FILE = path.join(app.getPath("userData"), "credential.bin");
+const VOCABULARY_FILE = path.join(app.getPath("userData"), "vocabulary.json");
 const ALLOW_INSECURE_LOCALHOST = app.commandLine.hasSwitch("allow-insecure-localhost");
 
 let win: BrowserWindow | null = null;
@@ -65,11 +72,19 @@ let protocol: ProtocolNegotiation | null = null;
 let credentials: CredentialStore | null = null;
 let startupPairingDetail: string | null = null;
 let networkGeneration = 0;
+let shutdownStarted = false;
+let shutdownReady = false;
 
 const SMALL_RESPONSE_LIMIT = 64 * 1024;
 const VOCABULARY_RESPONSE_LIMIT = 16 * 1024 * 1024;
 const VOCABULARY_RESPONSE_TIMEOUT_MS = 60_000;
 const dashboardClient = new DashboardClient();
+const settingsStore = new SettingsStore(STORE, parseSettingsDocument, {
+  onError: (message, error) => console.error(message, errorMessage(error)),
+});
+const vocabularyFile = new AtomicJsonFile<Vocabulary>(VOCABULARY_FILE, parseVocabulary, {
+  onError: (message, error) => console.error(message, errorMessage(error)),
+});
 const feedConnection = new FeedConnectionManager({
   onStatus: (status) => relay("status", status),
   onEvent: (message) => handleEvent(message),
@@ -138,38 +153,68 @@ function requestFailureMessage(result: DashboardRequestFailure): string {
   return result.message;
 }
 
-function load(): Settings {
-  try { return parseSettings(JSON.parse(fs.readFileSync(STORE, "utf8"))); } catch { return {}; }
-}
-function save(patch: Partial<Settings>, remove: readonly (keyof Settings)[] = []): Settings {
-  const next = Object.assign(load(), patch);
-  remove.forEach((key) => { delete next[key]; });
-  try {
-    fs.mkdirSync(path.dirname(STORE), { recursive: true });
-    fs.writeFileSync(STORE, JSON.stringify(next, null, 2));
-  } catch (error) { console.error("settings write failed:", errorMessage(error)); }
-  return next;
-}
-
 function storedOrigin(serverUrl: unknown): DashboardOriginResult {
   return parseDashboardOrigin(serverUrl, ALLOW_INSECURE_LOCALHOST);
 }
 
 function session(): { serverUrl: string; token: string } | null {
   const token = credentials?.get();
-  const parsed = storedOrigin(load().serverUrl);
+  const parsed = storedOrigin(settingsStore.get().serverUrl);
   return token && parsed.ok ? { serverUrl: parsed.origin, token } : null;
 }
 
+function attachedDisplays(): DisplayGeometry[] {
+  return screen.getAllDisplays().map((display) => ({
+    id: display.id,
+    workArea: { ...display.workArea },
+    scaleFactor: display.scaleFactor,
+  }));
+}
+
+function primaryDisplayId(): number {
+  return screen.getPrimaryDisplay().id;
+}
+
+function sameBounds(left: Electron.Rectangle, right: Electron.Rectangle): boolean {
+  return left.x === right.x && left.y === right.y &&
+    left.width === right.width && left.height === right.height;
+}
+
+function rememberWindowBounds(): void {
+  if (quitting || !win || win.isDestroyed()) return;
+  const placement = captureWindowPlacement(win.getBounds(), attachedDisplays(), primaryDisplayId());
+  settingsStore.scheduleSave(
+    { windowPlacement: placement },
+    ["x", "y", "width", "height"],
+  );
+}
+
+function recoverWindowBounds(): void {
+  if (quitting || !win || win.isDestroyed()) return;
+  const displays = attachedDisplays();
+  const settings = settingsStore.get();
+  const bounds = restoreWindowBounds(
+    settings.windowPlacement ?? null,
+    legacyBounds(settings),
+    displays,
+    primaryDisplayId(),
+  );
+  if (!sameBounds(win.getBounds(), bounds)) win.setBounds(bounds);
+  rememberWindowBounds();
+}
+
 function createWindow(): void {
-  const saved = load();
-  const area = screen.getPrimaryDisplay().workAreaSize;
+  const saved = settingsStore.get();
+  const displays = attachedDisplays();
+  const bounds = restoreWindowBounds(
+    saved.windowPlacement ?? null,
+    legacyBounds(saved),
+    displays,
+    primaryDisplayId(),
+  );
 
   win = new BrowserWindow({
-    width: saved.width || 380,
-    height: saved.height || 460,
-    x: saved.x != null ? saved.x : area.width - 400,
-    y: saved.y != null ? saved.y : 40,
+    ...bounds,
     frame: false,
     transparent: true,
     resizable: true,
@@ -211,18 +256,22 @@ function createWindow(): void {
   win.webContents.on("will-navigate", (event) => event.preventDefault());
   win.webContents.on("will-attach-webview", (event) => event.preventDefault());
 
-  const remember = () => {
-    if (!win || win.isDestroyed()) return;
-    const b = win.getBounds();
-    save({ x: b.x, y: b.y, width: b.width, height: b.height });
-  };
-  win.on("moved", remember);
-  win.on("resized", remember);
+  win.on("moved", rememberWindowBounds);
+  win.on("resized", rememberWindowBounds);
+  rememberWindowBounds();
 
   // Closing the window ends the app. A tray-only survivor is exactly how you
   // end up with a process you can't see, holding its temp directory open so
   // the next `npm run build` fails.
   win.on("closed", () => { win = null; if (!quitting) app.quit(); });
+
+  screen.on("display-removed", recoverWindowBounds);
+  screen.on("display-added", recoverWindowBounds);
+  screen.on("display-metrics-changed", (_event, _display, metrics) => {
+    if (metrics.some((metric) => metric === "bounds" || metric === "workArea" || metric === "scaleFactor")) {
+      recoverWindowBounds();
+    }
+  });
 }
 
 function makeTray(): void {
@@ -242,8 +291,9 @@ function makeTray(): void {
     { label: "Re-pair\u2026", click: () => relay("repair", undefined) },
     { label: "Reset position", click: () => {
         if (!win) return;
-        const area = screen.getPrimaryDisplay().workAreaSize;
-        win.setBounds({ x: area.width - 400, y: 40, width: 380, height: 460 });
+        const bounds = resetWindowBounds(win.getBounds(), attachedDisplays(), primaryDisplayId());
+        win.setBounds(bounds);
+        rememberWindowBounds();
         win.show();
       } },
     { type: "separator" },
@@ -267,16 +317,13 @@ let clipStats: ClipboardStats = { sent: 0, ignored: 0, lastKind: null, lastAt: 0
 // EVE's item vocabulary, fetched from the dashboard and cached. The filter
 // refuses to send anything until this arrives - see clipboard-filter.ts.
 let vocabulary: Set<string> | null = null;
-const VOCAB_FILE = (): string => path.join(app.getPath("userData"), "vocabulary.json");
 
-function loadVocabulary(): number | null {
-  try {
-    const raw = parseVocabulary(JSON.parse(fs.readFileSync(VOCAB_FILE(), "utf8")));
-    if (raw) {
-      vocabulary = new Set(raw.words);
-      return raw.buildNumber ?? null;
-    }
-  } catch { /* first run, or the cache is unreadable */ }
+async function loadVocabulary(): Promise<number | null> {
+  const raw = await vocabularyFile.load();
+  if (raw) {
+    vocabulary = new Set(raw.words);
+    return raw.buildNumber ?? null;
+  }
   return null;
 }
 
@@ -297,18 +344,18 @@ function fetchVocabulary(): void {
   }).then((result) => {
     if (!result.ok || generation !== networkGeneration) return;
     vocabulary = new Set(result.body.words);
-    try { fs.writeFileSync(VOCAB_FILE(), JSON.stringify(result.body)); } catch { /* keep the in-memory copy */ }
+    void vocabularyFile.write(result.body);
     relay("clipwatch", { on: clipboardWatching(), stats: clipStats,
                          vocabulary: vocabulary.size });
   });
 }
 
 function clipboardWatching(): boolean {
-  return !!load().watchClipboard;
+  return !!settingsStore.get().watchClipboard;
 }
 
 function setClipboardWatching(on: boolean): void {
-  save({ watchClipboard: !!on });
+  settingsStore.scheduleSave({ watchClipboard: !!on });
   if (on) startClipWatch();
   else stopClipWatch();
   relay("clipwatch", { on: !!on, stats: clipStats });
@@ -504,7 +551,7 @@ handleIpc("pair", () => ({ ok: false, error: "Request rejected." }), async (_eve
   networkGeneration += 1;
   dashboardClient.cancelAll();
   stop();
-  save({ serverUrl: parsedOrigin.origin }, ["token"]);
+  await settingsStore.saveNow({ serverUrl: parsedOrigin.origin }, ["token"]);
   startupPairingDetail = null;
   protocol = null;
   vocabulary = null;
@@ -524,7 +571,7 @@ handleIpc("unpair", () => false, async (_event, input) => {
   protocol = null;
   startupPairingDetail = null;
   await credentials?.clear();
-  save({}, ["token"]);
+  await settingsStore.saveNow({}, ["token"]);
   relay("unpaired", undefined);
   relay("status", { state: "unpaired" });
   return true;
@@ -532,7 +579,7 @@ handleIpc("unpair", () => false, async (_event, input) => {
 
 handleIpc("state", (): ViewerState => ({ paired: false, serverUrl: "", opacity: 1 }), (_event, input): ViewerState => {
   if (!parseNoArguments(input)) return { paired: false, serverUrl: "", opacity: 1 };
-  const s = load();
+  const s = settingsStore.get();
   return {
     paired: !!credentials?.get(),
     serverUrl: s.serverUrl || "",
@@ -543,8 +590,8 @@ handleIpc("state", (): ViewerState => ({ paired: false, serverUrl: "", opacity: 
 
 handleIpc("opacity", () => 1, (_event, level) => {
   const n = parseOpacity(level);
-  if (n === null) return load().opacity ?? 1;
-  save({ opacity: n });
+  if (n === null) return settingsStore.get().opacity ?? 1;
+  settingsStore.scheduleSave({ opacity: n });
   return n;
 });
 
@@ -565,12 +612,12 @@ handleIpc("bump", () => ({ ok: false, error: "Request rejected." }), async (_eve
     method: "POST",
     token,
     body: { scanId },
-    parse: parseBumpResult,
+    parse: parseBumpResponse,
     maxResponseBytes: SMALL_RESPONSE_LIMIT,
   });
   // The timer itself arrives over the feed, not from this response, so the
   // bumper sees exactly what everyone else sees at the same time.
-  if (result.ok) return result.body;
+  if (result.ok) return { ok: true };
 
   const failure = parseServerError(result.body);
   // A 404 has two very different causes and they need different advice.
@@ -619,9 +666,9 @@ handleIpc("close", () => undefined, (_event, input) => {
 
 async function initializeSecurityState(): Promise<void> {
   credentials = new CredentialStore(CREDENTIAL_FILE, safeStorage);
-  const settings = load();
+  const settings = settingsStore.get();
   const initialized = await credentials.initialize(settings.token);
-  if (initialized.removeLegacyToken) save({}, ["token"]);
+  if (initialized.removeLegacyToken) await settingsStore.saveNow({}, ["token"]);
 
   if (initialized.status === "unavailable") {
     startupPairingDetail = "Secure credential storage is unavailable - pair again after it is restored.";
@@ -632,7 +679,9 @@ async function initializeSecurityState(): Promise<void> {
   if (settings.serverUrl) {
     const parsed = storedOrigin(settings.serverUrl);
     if (parsed.ok) {
-      if (parsed.origin !== settings.serverUrl) save({ serverUrl: parsed.origin }, ["token"]);
+      if (parsed.origin !== settings.serverUrl) {
+        await settingsStore.saveNow({ serverUrl: parsed.origin }, ["token"]);
+      }
     } else if (credentials.get()) {
       await credentials.clear();
       startupPairingDetail = "The stored dashboard address is no longer allowed - pair again.";
@@ -655,23 +704,32 @@ if (!gotLock) {
     if (win) { win.show(); win.focus(); }
   });
 
-  app.on("before-quit", () => {
+  app.on("before-quit", (event) => {
     quitting = true;
+    if (shutdownReady) return;
+    event.preventDefault();
+    if (shutdownStarted) return;
+    shutdownStarted = true;
     networkGeneration += 1;
     dashboardClient.cancelAll();
     stop();
     stopClipWatch();
     if (tray) { tray.destroy(); tray = null; }
+    void Promise.all([settingsStore.flush(), vocabularyFile.flush()]).finally(() => {
+      shutdownReady = true;
+      app.quit();
+    });
   });
 
   app.on("window-all-closed", () => app.quit());
 
   app.whenReady().then(async () => {
+    await settingsStore.initialize();
     await initializeSecurityState();
     createWindow();
     makeTray();
+    await loadVocabulary();
     connect();
-    loadVocabulary();
     fetchVocabulary();          // refresh in the background; cache covers the gap
     if (clipboardWatching()) startClipWatch();
   });
