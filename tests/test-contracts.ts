@@ -7,12 +7,16 @@ import {
   parseBumpClearedEvent,
   parseBumpEvent,
   parseClaimResponse,
+  parseClipboardRelayResponse,
   parseClipboardResult,
   parseConnectionStatus,
   parseHelloEvent,
+  parseNoArguments,
+  parseOpacity,
   parsePairRequest,
   parsePairResult,
   parseScan,
+  parseScanId,
   parseSettings,
   parseViewerState,
   parseVocabulary,
@@ -49,15 +53,22 @@ ok("known settings survive", settings.serverUrl === "https://dashboard.example" 
 ok("unknown settings are discarded", !("unexpected" in settings));
 ok("invalid settings object fails closed", Object.keys(parseSettings(["not", "settings"])).length === 0);
 ok("invalid individual settings are omitted", parseSettings({ width: Infinity, opacity: 9 }).width === undefined);
+ok("invalid legacy credentials are marked for removal", parseSettings({ token: "x".repeat(8_193) }).token === null);
 
 console.log("\n=== IPC request and result boundaries ===");
-ok("valid pair request", parsePairRequest({ serverUrl: "https://example", code: "123456", future: true })?.code === "123456");
+ok("valid pair request", parsePairRequest({ serverUrl: "https://example", code: "123456" })?.code === "123456");
 ok("pair request rejects missing code", parsePairRequest({ serverUrl: "https://example" }) === null);
 ok("pair request rejects arrays", parsePairRequest([]) === null);
-ok("pair success result", parsePairResult({ ok: true, extra: "ignored" })?.ok === true);
+ok("pair request rejects extra keys", parsePairRequest({ serverUrl: "https://example", code: "123456", future: true }) === null);
+ok("pair request rejects exotic objects", parsePairRequest(new Date()) === null);
+ok("pair success result", parsePairResult({ ok: true })?.ok === true);
+ok("pair result rejects extra keys", parsePairResult({ ok: true, extra: "ignored" }) === null);
 ok("pair failure requires a string error", parsePairResult({ ok: false, error: 500 }) === null);
 ok("viewer state accepts only known opacity levels", parseViewerState({ paired: true, serverUrl: "x", opacity: 1 })?.opacity === 1);
 ok("viewer state rejects malformed opacity", parseViewerState({ paired: true, serverUrl: "x", opacity: 3 }) === null);
+ok("opacity requests are strict", parseOpacity(2) === 2 && parseOpacity(2.4) === null && parseOpacity("1") === null);
+ok("scan ids are bounded", parseScanId("scan-1") === "scan-1" && parseScanId("") === null && parseScanId("x".repeat(257)) === null);
+ok("no-argument calls are strict", parseNoArguments(undefined) && !parseNoArguments({}));
 
 console.log("\n=== dashboard payload boundaries ===");
 const scan = parseScan({
@@ -72,15 +83,30 @@ const scan = parseScan({
 ok("valid scan parses", scan?.hull === "Obelisk" && scan.fleetAll?.[0]?.ships === 12);
 ok("scan additive fields are discarded", scan !== null && !("futureField" in scan));
 ok("numeric strings are normalized", parseScan({ id: "scan-2", at: "42", ehp: "1000" })?.ehp === 1000);
+ok("finite decimal scan values remain wire-compatible", parseScan({
+  id: "scan-decimals",
+  at: 1_700_000_000_000,
+  valueSell: 3_000_000_000.42,
+  valueBuy: "2999999999.75",
+  ehp: 12345.5,
+})?.valueBuy === 2_999_999_999.75);
 ok("scan requires an id", parseScan({ at: 1 }) === null);
 ok("scan rejects non-finite numbers", parseScan({ id: "bad", at: 1, ehp: Infinity }) === null);
 ok("scan rejects malformed nested fleet", parseScan({ id: "bad", at: 1, fleetAll: [{ name: "Talos" }] }) === null);
 ok("scan rejects malformed nested cargo", parseScan({ id: "bad", at: 1, cargoList: "cargo" }) === null);
+ok("scan rejects oversized text", parseScan({ id: "bad", at: 1, notes: "x".repeat(64_001) }) === null);
+ok("scan rejects oversized nested lists", parseScan({
+  id: "bad", at: 1, fleetAll: Array.from({ length: 1_001 }, () => ({ name: "Talos", ships: 1 })),
+}) === null);
+ok("scan rejects unsafe and negative numbers", parseScan({ id: "bad", at: -1 }) === null &&
+   parseScan({ id: "bad", at: 1, valueSell: Number.MAX_SAFE_INTEGER + 1 }) === null);
 
 const bump = parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 2, holdMs: 180000, remainingMs: 90000, future: true });
 ok("valid bump parses", bump?.remainingMs === 90000);
 ok("legacy bump without remaining parses", parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 1, holdMs: 180000 }) !== null);
 ok("bump rejects malformed duration", parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 1, holdMs: "never" }) === null);
+ok("bump rejects out-of-range values", parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 0, holdMs: 1 }) === null &&
+   parseBumpEvent({ scanId: "scan-1", by: "pilot", count: 1, holdMs: 86_400_001 }) === null);
 ok("bump-cleared requires scan id", parseBumpClearedEvent({ scanId: "scan-1" })?.scanId === "scan-1" && parseBumpClearedEvent({}) === null);
 const hello = parseHelloEvent({
   name: "MiniLuv",
@@ -123,6 +149,7 @@ ok("malformed protocol versions reject", parseHelloEvent({ name: "bad", protocol
 ok("malformed capability lists reject", parseHelloEvent({ name: "bad", protocolVersion: 1, capabilities: ["scan-feed", 7] }) === null);
 ok("hello still requires dashboard name", parseHelloEvent({ protocolVersion: 1, capabilities: [] }) === null);
 ok("claim requires non-empty token", parseClaimResponse({ token: "secret", future: true })?.token === "secret" && parseClaimResponse({ token: "" }) === null);
+ok("claim rejects oversized tokens", parseClaimResponse({ token: "x".repeat(8_193) }) === null);
 
 console.log("\n=== portable dashboard protocol fixture ===");
 const ROOT = path.resolve(__dirname, "..", "..");
@@ -197,6 +224,8 @@ ok("fixture pairing response parses", parseClaimResponse(response(namedValue(fix
    ["pairingClaim", "claim", "claimResponse", "pairingResponse"]))) !== null);
 ok("fixture vocabulary response parses", parseVocabulary(response(namedValue(fixture,
    ["vocabulary", "vocabularyResponse"]))) !== null);
+ok("fixture clipboard relay response parses", parseClipboardRelayResponse(response(namedValue(fixture,
+   ["clipboardRelay", "clipboardResponse"])))?.delivered === 1);
 
 console.log("\n=== vocabulary, clipboard, and status boundaries ===");
 ok("valid vocabulary parses", parseVocabulary({ words: ["tritanium", "obelisk"], buildNumber: 123 })?.words.length === 2);
@@ -206,11 +235,14 @@ const clipboard = parseClipboardResult({
   stats: { sent: 1, ignored: 2, lastKind: "fit", lastAt: 10 },
   sentKind: "fit",
   delivered: 1,
-  extra: "ignored",
 });
 ok("valid clipboard result parses", clipboard?.delivered === 1 && clipboard.stats.lastKind === "fit");
 ok("clipboard rejects malformed stats", parseClipboardResult({ on: true, stats: { sent: "one" } }) === null);
-ok("known status parses", parseConnectionStatus({ state: "reconnecting", detail: "2s", future: true })?.detail === "2s");
+ok("clipboard IPC results reject extra keys", parseClipboardResult({
+  on: true, stats: { sent: 1, ignored: 2, lastKind: null, lastAt: 0 }, future: true,
+}) === null);
+ok("known status parses", parseConnectionStatus({ state: "reconnecting", detail: "2s" })?.detail === "2s");
+ok("status IPC rejects extra keys", parseConnectionStatus({ state: "live", future: true }) === null);
 ok("compatibility status parses", parseConnectionStatus({
   state: "warn", compatibility: "newer-protocol", protocolVersion: 2,
 })?.compatibility === "newer-protocol");

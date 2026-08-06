@@ -175,8 +175,21 @@ ok("no arbitrary filesystem write reachable from the renderer",
    "settings are written by save(), which takes no renderer-supplied path");
 const stateBody = (main.match(/handleIpc\("state"[\s\S]*?\n\}\);/) || [""])[0] ?? "";
 ok("state() reports pairing as a boolean, never the token itself",
-   /paired: !!s\.token/.test(stateBody) && !/token: /.test(stateBody),
+   /paired: !!credentials\?\.get\(\)/.test(stateBody) && !/token: /.test(stateBody),
    "page script must not be able to read the credential");
+ok("credentials use asynchronous OS storage",
+   /CredentialStore/.test(main) && /safeStorage/.test(main) && /credential\.bin/.test(main));
+ok("settings token is migration-only and removed",
+   /credentials\.initialize\(settings\.token\)/.test(main) &&
+   /initialized\.removeLegacyToken\) save\(\{\}, \["token"\]\)/.test(main) &&
+   !/save\(\{[^}]*token:/.test(main));
+ok("authentication expiry clears encrypted credentials",
+   /statusCode === 401 \|\| res\.statusCode === 403[\s\S]{0,240}credentials\?\.clear\(\)/.test(main));
+ok("all authenticated requests read the validated session",
+   (main.match(/const auth = session\(\)/g) || []).length === 4 &&
+   !/\{ serverUrl, token \} = load\(\)/.test(main));
+ok("IPC is restricted to the viewer main frame",
+   /runAuthorizedIpc\(event, webContents/.test(main));
 
 console.log("\n" + (fail === 0 ? "ALL " + pass + " PASSED" : pass + " passed, " + fail + " FAILED"));
 process.exit(fail === 0 ? 0 : 1);

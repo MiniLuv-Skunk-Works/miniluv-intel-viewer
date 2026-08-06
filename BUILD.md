@@ -19,9 +19,11 @@ game without touching the client.
 ## Distributing it
 
 Drop the exe wherever MiniLuv shares files. It's self-contained: first run
-unpacks to a temp directory and starts. Settings (server address, pairing
-token, window position) go in
-`%APPDATA%\milf-viewer\settings.json` and survive updates.
+unpacks to a temp directory and starts. Non-secret settings (server address,
+window position, opacity, and clipboard preference) go in
+`%APPDATA%\milf-viewer\settings.json`. The bearer credential is encrypted with
+Electron `safeStorage` into `credential.bin`; an older plaintext settings token
+is migrated and removed on the next successful startup.
 
 **Windows SmartScreen will warn on first run** — "Windows protected your PC" —
 because the exe isn't code-signed. More Info → Run anyway. Signing needs a
@@ -35,6 +37,14 @@ npm start
 ```
 
 Runs from source with the same behaviour.
+
+Normal dashboard addresses require HTTPS. To connect a development build to a
+plain-HTTP dashboard on `localhost`, `127.0.0.0/8`, or `::1`, opt in for that
+launch only:
+
+```
+npm start -- --allow-insecure-localhost
+```
 
 `npm start`, `npm test`, and `npm run build` compile TypeScript into `.build\`
 before launching their respective command. The generated JavaScript is ignored
@@ -51,6 +61,9 @@ After `npm run build`, close any development copy and launch
 4. Clipboard watching starts only after clicking its control, reports a capture, and can be turned off again.
 5. Tray Show, Clear feed, Re-pair, Reset position, and Quit actions remain reachable.
 6. Re-pairing removes the old feed state, and Quit exits both the window and tray process.
+7. `settings.json` contains no bearer token after pairing or legacy migration; `credential.bin` is present and opaque.
+8. Remote HTTP and loopback HTTP without the development switch show actionable pairing errors.
+9. The packaged renderer still reports `contextIsolation: true`, `nodeIntegration: false`, and `sandbox: true` in its compiled main-process configuration.
 
 The pairing, live-feed, bump, and clipboard checks require a compatible
 dashboard. If one is unavailable, record those items as not exercised rather

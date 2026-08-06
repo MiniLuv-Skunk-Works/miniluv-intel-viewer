@@ -9,7 +9,7 @@
 // Works with windowed and borderless-fullscreen EVE. Exclusive fullscreen will
 // cover it, which is the cost of not injecting.
 
-import { app, BrowserWindow, ipcMain, screen, Tray, Menu, clipboard } from "electron";
+import { app, BrowserWindow, ipcMain, screen, Tray, Menu, clipboard, safeStorage } from "electron";
 import type { IpcMainInvokeEvent } from "electron";
 import * as path from "node:path";
 import * as fs from "node:fs";
@@ -17,12 +17,17 @@ import * as https from "node:https";
 import * as http from "node:http";
 import { URL } from "node:url";
 import { classify } from "./clipboard-filter";
+import { CredentialStore } from "./credentials";
+import { parseDashboardOrigin, type DashboardOriginResult } from "./dashboard-url";
+import { runAuthorizedIpc } from "./ipc-security";
 import {
   parseBumpClearedEvent,
   parseBumpEvent,
   parseClaimResponse,
+  parseClipboardRelayResponse,
   parseClipWatchRequest,
   parseHelloEvent,
+  parseNoArguments,
   negotiateProtocol,
   parseOpacity,
   parsePairRequest,
@@ -49,6 +54,8 @@ import {
 } from "./contracts";
 
 const STORE = path.join(app.getPath("userData"), "settings.json");
+const CREDENTIAL_FILE = path.join(app.getPath("userData"), "credential.bin");
+const ALLOW_INSECURE_LOCALHOST = app.commandLine.hasSwitch("allow-insecure-localhost");
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -56,6 +63,8 @@ let stream: http.ClientRequest | null = null;
 let retryMs = 1000;
 let quitting = false;
 let protocol: ProtocolNegotiation | null = null;
+let credentials: CredentialStore | null = null;
+let startupPairingDetail: string | null = null;
 
 function supports(capability: KnownCapability): boolean {
   // Until a complete modern hello arrives, act like the released viewer so
@@ -113,13 +122,24 @@ function errorMessage(error: unknown): string {
 function load(): Settings {
   try { return parseSettings(JSON.parse(fs.readFileSync(STORE, "utf8"))); } catch { return {}; }
 }
-function save(patch: Partial<Settings>): Settings {
+function save(patch: Partial<Settings>, remove: readonly (keyof Settings)[] = []): Settings {
   const next = Object.assign(load(), patch);
+  remove.forEach((key) => { delete next[key]; });
   try {
     fs.mkdirSync(path.dirname(STORE), { recursive: true });
     fs.writeFileSync(STORE, JSON.stringify(next, null, 2));
   } catch (error) { console.error("settings write failed:", errorMessage(error)); }
   return next;
+}
+
+function storedOrigin(serverUrl: unknown): DashboardOriginResult {
+  return parseDashboardOrigin(serverUrl, ALLOW_INSECURE_LOCALHOST);
+}
+
+function session(): { serverUrl: string; token: string } | null {
+  const token = credentials?.get();
+  const parsed = storedOrigin(load().serverUrl);
+  return token && parsed.ok ? { serverUrl: parsed.origin, token } : null;
 }
 
 function createWindow(): void {
@@ -243,10 +263,10 @@ function loadVocabulary(): number | null {
 
 function fetchVocabulary(): void {
   if (!supports(PROTOCOL_CAPABILITIES.clipboardVocabulary)) return;
-  const { serverUrl, token } = load();
-  if (!serverUrl || !token) return;
-  let target;
-  try { target = new URL("/api/viewer/vocabulary", serverUrl); } catch { return; }
+  const auth = session();
+  if (!auth) return;
+  const { serverUrl, token } = auth;
+  const target = new URL("/api/viewer/vocabulary", serverUrl);
   const lib = target.protocol === "https:" ? https : http;
   const req = lib.request(target, {
     method: "GET", headers: { Authorization: "Bearer " + token }
@@ -317,10 +337,10 @@ function sendClip(clip: ClipboardCapture): void {
     relay("clipwatch", { on: clipboardWatching(), stats: clipStats, error: "dashboard does not advertise clipboard relay" });
     return;
   }
-  const { serverUrl, token } = load();
-  if (!serverUrl || !token) return;
-  let target;
-  try { target = new URL("/api/viewer/clip", serverUrl); } catch { return; }
+  const auth = session();
+  if (!auth) return;
+  const { serverUrl, token } = auth;
+  const target = new URL("/api/viewer/clip", serverUrl);
 
   const lib = target.protocol === "https:" ? https : http;
   const body = JSON.stringify(clip);
@@ -339,10 +359,8 @@ function sendClip(clip: ClipboardCapture): void {
       let parsed: unknown = {};
       try { parsed = JSON.parse(out); } catch {}
       const response = parseServerError(parsed);
-      const responseRecord = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown> : {};
-      const delivered = typeof responseRecord.delivered === "number" && Number.isFinite(responseRecord.delivered)
-        ? responseRecord.delivered : 0;
+      const relayResponse = parseClipboardRelayResponse(parsed);
+      const delivered = relayResponse?.delivered ?? 0;
       clipStats.sent += 1;
       clipStats.lastKind = clip.kind;
       clipStats.lastAt = Date.now();
@@ -369,12 +387,15 @@ function relay<K extends keyof IpcEventContract>(channel: K, payload: IpcEventCo
 // Authorization header - EventSource can't, which would force the token into
 // the query string and therefore into the proxy's access log.
 function connect(): void {
-  const { serverUrl, token } = load();
-  if (!serverUrl || !token) { relay("status", { state: "unpaired" }); return; }
-
-  let target;
-  try { target = new URL("/api/feed", serverUrl); }
-  catch { relay("status", { state: "error", detail: "bad server address" }); return; }
+  const auth = session();
+  if (!auth) {
+    relay("status", startupPairingDetail
+      ? { state: "unpaired", detail: startupPairingDetail }
+      : { state: "unpaired" });
+    return;
+  }
+  const { serverUrl, token } = auth;
+  const target = new URL("/api/feed", serverUrl);
 
   const lib = target.protocol === "https:" ? https : http;
   relay("status", { state: "connecting" });
@@ -390,7 +411,7 @@ function connect(): void {
     if (res.statusCode === 401 || res.statusCode === 403) {
       // The token is dead. Clear it and say so, rather than retrying forever
       // against a server that will never accept it.
-      save({ token: null });
+      void credentials?.clear();
       relay("status", { state: "unpaired", detail: "pairing expired - pair again" });
       res.resume();
       return;
@@ -488,20 +509,24 @@ type InvokeChannel = keyof IpcInvokeContract;
 
 function handleIpc<K extends InvokeChannel>(
   channel: K,
+  rejected: () => IpcInvokeContract[K]["result"],
   handler: (event: IpcMainInvokeEvent, request: unknown) => IpcInvokeContract[K]["result"] | Promise<IpcInvokeContract[K]["result"]>,
 ): void {
-  ipcMain.handle(channel, handler);
+  ipcMain.handle(channel, async (event, request: unknown) => {
+    const webContents = win && !win.isDestroyed() ? win.webContents : null;
+    return runAuthorizedIpc(event, webContents, rejected, async () => handler(event, request));
+  });
 }
 
-handleIpc("pair", async (_event, input): Promise<PairResult> => {
+handleIpc("pair", () => ({ ok: false, error: "Request rejected." }), async (_event, input): Promise<PairResult> => {
   const request = parsePairRequest(input);
   if (!request) return { ok: false, error: "Both server address and pairing code are required." };
   const { serverUrl, code } = request;
-  let target;
-  try { target = new URL("/api/viewer/claim", serverUrl); }
-  catch { return { ok: false, error: "That server address doesn't look right." }; }
+  const parsedOrigin = storedOrigin(serverUrl);
+  if (!parsedOrigin.ok) return { ok: false, error: parsedOrigin.error };
+  const target = new URL("/api/viewer/claim", parsedOrigin.origin);
 
-  const lib = target.protocol === "https:" ? https : http;
+  const lib = parsedOrigin.protocol === "https:" ? https : http;
   const body = JSON.stringify({ code: code });
 
   return new Promise((resolve) => {
@@ -512,13 +537,18 @@ handleIpc("pair", async (_event, input): Promise<PairResult> => {
       let out = "";
       res.setEncoding("utf8");
       res.on("data", (d) => { out += d; });
-      res.on("end", () => {
-      let parsed: unknown = {};
-      try { parsed = JSON.parse(out); } catch {}
-      const claim = parseClaimResponse(parsed);
-      const failure = parseServerError(parsed);
-      if (res.statusCode === 200 && claim) {
-          save({ serverUrl: serverUrl, token: claim.token });
+      res.on("end", async () => {
+        let parsed: unknown = {};
+        try { parsed = JSON.parse(out); } catch {}
+        const claim = parseClaimResponse(parsed);
+        const failure = parseServerError(parsed);
+        if (res.statusCode === 200 && claim) {
+          if (!credentials || !await credentials.set(claim.token)) {
+            resolve({ ok: false, error: "Secure credential storage is unavailable. Pair again after it is restored." });
+            return;
+          }
+          save({ serverUrl: parsedOrigin.origin }, ["token"]);
+          startupPairingDetail = null;
           protocol = null;
           vocabulary = null;
           fetchVocabulary();
@@ -539,44 +569,48 @@ handleIpc("pair", async (_event, input): Promise<PairResult> => {
 // Forget the token and show the pairing screen. Reachable from the header and
 // the tray at ALL times - not only when the server happens to reject us.
 // Otherwise a stale token plus an unreachable server leaves no way back in.
-handleIpc("unpair", () => {
+handleIpc("unpair", () => false, async (_event, input) => {
+  if (!parseNoArguments(input)) return false;
   stop();
   protocol = null;
-  save({ token: null });
+  startupPairingDetail = null;
+  await credentials?.clear();
+  save({}, ["token"]);
   relay("unpaired", undefined);
   relay("status", { state: "unpaired" });
   return true;
 });
 
-handleIpc("state", (): ViewerState => {
+handleIpc("state", (): ViewerState => ({ paired: false, serverUrl: "", opacity: 1 }), (_event, input): ViewerState => {
+  if (!parseNoArguments(input)) return { paired: false, serverUrl: "", opacity: 1 };
   const s = load();
   return {
-    paired: !!s.token,
+    paired: !!credentials?.get(),
     serverUrl: s.serverUrl || "",
     // 0 solid / 1 default / 2 faint. The renderer applies it as a CSS class.
     opacity: s.opacity == null ? 1 : s.opacity
   };
 });
 
-handleIpc("opacity", (_event, level) => {
+handleIpc("opacity", () => 1, (_event, level) => {
   const n = parseOpacity(level);
+  if (n === null) return load().opacity ?? 1;
   save({ opacity: n });
   return n;
 });
 
 // Bumping is the viewer's only write. It goes out with the same bearer token
 // the feed uses, so a paired viewer can bump and an unpaired one cannot.
-handleIpc("bump", async (_event, input): Promise<BumpResult> => {
+handleIpc("bump", () => ({ ok: false, error: "Request rejected." }), async (_event, input): Promise<BumpResult> => {
   const scanId = parseScanId(input);
   if (scanId === null) return { ok: false, error: "invalid scan" };
-  const { serverUrl, token } = load();
-  if (!serverUrl || !token) return { ok: false, error: "not paired" };
+  const auth = session();
+  if (!auth) return { ok: false, error: "not paired" };
+  const { serverUrl, token } = auth;
   if (!supports(PROTOCOL_CAPABILITIES.bumpControl)) {
     return { ok: false, error: "This dashboard does not advertise bump control." };
   }
-  let target;
-  try { target = new URL("/api/viewer/bump", serverUrl); }
-  catch { return { ok: false, error: "bad server address" }; }
+  const target = new URL("/api/viewer/bump", serverUrl);
 
   const lib = target.protocol === "https:" ? https : http;
   const body = JSON.stringify({ scanId: scanId });
@@ -622,7 +656,11 @@ handleIpc("bump", async (_event, input): Promise<BumpResult> => {
   });
 });
 
-handleIpc("clipwatch", (_event, input): ClipboardResult => {
+handleIpc("clipwatch", () => ({
+  on: false,
+  stats: clipStats,
+  error: "Request rejected.",
+}), (_event, input): ClipboardResult => {
   const on = parseClipWatchRequest(input);
   if (on === null) return { on: clipboardWatching(), stats: clipStats, error: "invalid clipboard setting" };
   if (on === undefined) {
@@ -642,7 +680,35 @@ handleIpc("clipwatch", (_event, input): ClipboardResult => {
   return { on: clipboardWatching(), stats: clipStats };
 });
 
-handleIpc("close", () => { app.quit(); });
+handleIpc("close", () => undefined, (_event, input) => {
+  if (parseNoArguments(input)) app.quit();
+});
+
+async function initializeSecurityState(): Promise<void> {
+  credentials = new CredentialStore(CREDENTIAL_FILE, safeStorage);
+  const settings = load();
+  const initialized = await credentials.initialize(settings.token);
+  if (initialized.removeLegacyToken) save({}, ["token"]);
+
+  if (initialized.status === "unavailable") {
+    startupPairingDetail = "Secure credential storage is unavailable - pair again after it is restored.";
+  } else if (initialized.status === "corrupt") {
+    startupPairingDetail = "The stored pairing could not be unlocked - pair again.";
+  }
+
+  if (settings.serverUrl) {
+    const parsed = storedOrigin(settings.serverUrl);
+    if (parsed.ok) {
+      if (parsed.origin !== settings.serverUrl) save({ serverUrl: parsed.origin }, ["token"]);
+    } else if (credentials.get()) {
+      await credentials.clear();
+      startupPairingDetail = "The stored dashboard address is no longer allowed - pair again.";
+    }
+  } else if (credentials.get()) {
+    await credentials.clear();
+    startupPairingDetail = "The stored pairing is incomplete - pair again.";
+  }
+}
 
 // ── lifecycle ───────────────────────────────────────────────
 // Without a single-instance lock, launching again while one is running gives
@@ -665,7 +731,8 @@ if (!gotLock) {
 
   app.on("window-all-closed", () => app.quit());
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    await initializeSecurityState();
     createWindow();
     makeTray();
     connect();

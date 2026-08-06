@@ -23,9 +23,9 @@ target machine does not need Node.js.
 3. Enter the dashboard address and one-time pairing code in the viewer.
 4. New scans will appear as they are posted.
 
-The viewer remembers its dashboard address, pairing token, window position, and
-opacity under `%APPDATA%\milf-viewer`. Use **Re-pair** in the header or tray menu
-to connect it to a different dashboard.
+The viewer remembers its dashboard address, encrypted pairing credential,
+window position, and opacity under `%APPDATA%\milf-viewer`. Use **Re-pair** in
+the header or tray menu to connect it to a different dashboard.
 
 ## Features
 
@@ -59,6 +59,25 @@ Install dependencies and run from source:
 npm ci
 npm start
 ```
+
+Dashboard addresses must use HTTPS. For a loopback-only development dashboard,
+plain HTTP can be enabled for that launch without changing stored settings:
+
+```powershell
+npm start -- --allow-insecure-localhost
+```
+
+The exception accepts only `localhost`, `127.0.0.0/8`, and `::1`; private-LAN
+and public HTTP addresses remain blocked.
+
+### Runtime support policy
+
+The viewer currently targets Electron 43.2.x (Chromium 150 and Node.js 24).
+Electron supports its latest three stable major versions, so maintainers should
+review each stable Electron release and upgrade before the installed major
+reaches end of life. Electron 43 reaches end of life on January 5, 2027. Patch
+and minor updates within the selected major are accepted through the package
+range and locked by `package-lock.json`.
 
 Type-check the application and tests, then run the portable test suite:
 
@@ -134,6 +153,10 @@ manual recovery steps.
 | `main.ts` | Electron main process, pairing, feed connection, tray, and clipboard polling |
 | `preload.ts` | Narrow, typed IPC bridge exposed to the sandboxed renderer |
 | `contracts.ts` | Shared IPC/domain types and runtime boundary parsers |
+| `dashboard-url.ts` | HTTPS and explicit loopback-development origin policy |
+| `credentials.ts` | OS-encrypted bearer credential storage and migration |
+| `ipc-security.ts` | Viewer-window and main-frame IPC authorization |
+| `validation.ts` | Central string, list, timestamp, and numeric bounds |
 | `renderer/` | TypeScript viewer interface, static HTML, icons, and live countdown behavior |
 | `clipboard-filter.ts` | Local, fail-closed fit and cargo classifier |
 | `tests/*.ts` | Portable behavior, security, clipboard, and contract checks |
@@ -144,5 +167,8 @@ manual recovery steps.
 
 The renderer uses context isolation, disables Node integration, enables the
 Electron sandbox, blocks navigation and new windows, and enforces a Content
-Security Policy. The pairing token is never exposed to renderer JavaScript.
-The viewer is a separate desktop application and does not inject code into EVE.
+Security Policy. The pairing token is never exposed to renderer JavaScript or
+stored as plaintext: Electron `safeStorage` protects `credential.bin` with the
+Windows user account's DPAPI key. Authenticated traffic requires HTTPS except
+for the explicit loopback-only development switch. The viewer is a separate
+desktop application and does not inject code into EVE.
