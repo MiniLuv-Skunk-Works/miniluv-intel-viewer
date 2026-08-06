@@ -44,7 +44,7 @@ verification commands.
 
 The viewer remembers its dashboard address, encrypted pairing credential,
 window position, and opacity under `%APPDATA%\milf-viewer`. Use **Re-pair** in
-the header or tray menu to connect it to another dashboard.
+viewer settings or the tray menu to connect it to another dashboard.
 
 ## Features
 

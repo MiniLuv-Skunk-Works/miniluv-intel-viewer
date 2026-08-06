@@ -315,6 +315,25 @@ async function run(): Promise<void> {
     detail?.getAttribute("aria-hidden") === "true" && document.activeElement?.id === "list",
   );
 
+  console.log("\n=== diagnostics navigation from settings ===");
+  document.getElementById("settingsBtn")?.click();
+  document.getElementById("diagBtn")?.click();
+  await flush();
+  ok(
+    "diagnostics replaces settings and receives focus",
+    document.getElementById("settings")?.getAttribute("aria-hidden") === "true" &&
+      document.getElementById("diagnostics")?.getAttribute("aria-hidden") === null &&
+      document.activeElement?.id === "diagnosticsClose",
+  );
+  document.getElementById("diagnosticsClose")?.click();
+  ok(
+    "diagnostics back returns to settings and restores focus",
+    document.getElementById("diagnostics")?.getAttribute("aria-hidden") === "true" &&
+      document.getElementById("settings")?.getAttribute("aria-hidden") === null &&
+      document.activeElement?.id === "diagBtn",
+  );
+  document.getElementById("settingsClose")?.click();
+
   console.log("\n=== pairing focus and safe Escape behavior ===");
   api.emitRepair();
   const pair = document.getElementById("pair");
@@ -329,8 +348,8 @@ async function run(): Promise<void> {
   ok("Tab wraps inside pairing", document.activeElement?.id === "server");
   key(document, "Escape");
   ok(
-    "Escape closes safe pairing and restores re-pair",
-    pair?.getAttribute("aria-hidden") === "true" && document.activeElement?.id === "repairBtn",
+    "Escape closes safe pairing and restores settings",
+    pair?.getAttribute("aria-hidden") === "true" && document.activeElement?.id === "settingsBtn",
   );
   api.emitUnpaired();
   key(document, "Escape");
@@ -355,6 +374,14 @@ async function run(): Promise<void> {
   console.log("\n=== accessible state and quiet live updates ===");
   const status = document.getElementById("status");
   const liveStatus = document.getElementById("liveStatus");
+  const statusDot = document.getElementById("dot");
+  ok(
+    "connection details live in the focusable status-dot tooltip",
+    document.getElementById("statusRow") === null &&
+      status?.getAttribute("role") === "tooltip" &&
+      statusDot?.getAttribute("tabindex") === "0" &&
+      statusDot.getAttribute("aria-describedby") === "status",
+  );
   ok(
     "connection status is a polite atomic live region",
     liveStatus?.getAttribute("role") === "status" &&
@@ -378,9 +405,16 @@ async function run(): Promise<void> {
   );
   ok(
     "abbreviated controls have accessible names",
-    ["quitBtn", "opBtn", "repairBtn", "clearBtn", "filterBtn", "muteBtn", "settingsBtn"].every(
-      (id) => document.getElementById(id)?.hasAttribute("aria-label"),
-    ),
+    [
+      "quitBtn",
+      "opBtn",
+      "repairBtn",
+      "clearBtn",
+      "diagBtn",
+      "filterBtn",
+      "muteBtn",
+      "settingsBtn",
+    ].every((id) => document.getElementById(id)?.hasAttribute("aria-label")),
   );
   ok(
     "all global actions retain native keyboard semantics",
@@ -390,10 +424,20 @@ async function run(): Promise<void> {
       "muteBtn",
       "settingsBtn",
       "clearBtn",
+      "diagBtn",
       "opBtn",
       "repairBtn",
       "quitBtn",
     ].every((id) => document.getElementById(id)?.tagName === "BUTTON"),
+  );
+  ok(
+    "secondary viewer controls live in settings instead of the compact header",
+    ["clipBtn", "clearBtn", "diagBtn", "opBtn", "repairBtn"].every(
+      (id) => !document.getElementById("appHeader")?.contains(document.getElementById(id)),
+    ) &&
+      ["filterBtn", "muteBtn", "settingsBtn", "quitBtn"].every((id) =>
+        document.getElementById("appHeader")?.contains(document.getElementById(id)),
+      ),
   );
 
   console.log("\n=== contrast at every transparency level ===");

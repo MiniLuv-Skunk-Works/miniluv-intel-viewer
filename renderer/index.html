@@ -65,6 +65,10 @@
         border-bottom: 1px solid var(--line);
         background: rgba(0, 0, 0, 0.28);
       }
+      #appHeader {
+        gap: 5px;
+        padding-left: 7px;
+      }
       .brand {
         font-weight: 800;
         letter-spacing: 0.5px;
@@ -75,21 +79,57 @@
         font-weight: 600;
         letter-spacing: 0;
       }
-      .dot {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        background: var(--dim);
+      .statusIndicator {
+        -webkit-app-region: no-drag;
+        position: relative;
+        display: flex;
+        align-items: center;
         flex: 0 0 auto;
       }
-      .dot.live {
+      .dot {
+        position: relative;
+        width: 17px;
+        height: 17px;
+        flex: 0 0 auto;
+      }
+      .dot::before {
+        content: "";
+        position: absolute;
+        inset: 5px;
+        border-radius: 50%;
+        background: var(--dim);
+      }
+      .dot.live::before {
         background: var(--green);
       }
-      .dot.warn {
+      .dot.warn::before {
         background: var(--amber);
       }
-      .dot.bad {
+      .dot.bad::before {
         background: var(--red);
+      }
+      #status {
+        position: absolute;
+        z-index: 20;
+        top: calc(100% + 8px);
+        left: 0;
+        width: max-content;
+        max-width: calc(100vw - 16px);
+        padding: 5px 7px;
+        border: 1px solid var(--control-border);
+        border-radius: 4px;
+        color: var(--text);
+        background: #17181a;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+        font-size: 11px;
+        line-height: 1.35;
+        white-space: normal;
+        pointer-events: none;
+        visibility: hidden;
+      }
+      .statusIndicator:hover #status,
+      .statusIndicator:focus-within #status {
+        visibility: visible;
       }
       .spacer {
         flex: 1;
@@ -108,6 +148,9 @@
         padding: 3px 7px;
         cursor: pointer;
       }
+      #appHeader button {
+        padding: 3px 5px;
+      }
       header button:hover {
         color: #fff;
         background: var(--blue-fill);
@@ -125,32 +168,6 @@
         outline-offset: 2px;
       }
 
-      #statusRow {
-        display: flex;
-        align-items: center;
-        border-bottom: 1px solid var(--line);
-        min-height: 26px;
-      }
-      #status {
-        flex: 1;
-        min-width: 0;
-        font-size: 11px;
-        color: var(--text);
-        padding: 4px 11px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      #diagBtn {
-        margin-right: 7px;
-        padding: 2px 6px;
-        font-size: 10px;
-        color: var(--text);
-        background: rgba(0, 0, 0, 0.32);
-        border: 1px solid var(--control-border);
-        border-radius: 4px;
-        cursor: pointer;
-      }
       .status-visually-hidden {
         position: absolute;
         width: 1px;
@@ -556,6 +573,25 @@
         border: 1px solid var(--control-border);
         border-radius: 4px;
       }
+      .viewerActions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 7px;
+      }
+      .viewerActions button {
+        padding: 6px 8px;
+        color: var(--text);
+        background: rgba(0, 0, 0, 0.32);
+        border: 1px solid var(--control-border);
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .viewerActions button.armed {
+        background: var(--green-fill);
+      }
+      .viewerActions button.wide {
+        grid-column: 1 / -1;
+      }
       .timeRow {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -619,18 +655,19 @@
   <body class="op1">
     <div id="viewerShell">
       <header id="appHeader">
-        <div class="dot" id="dot" aria-hidden="true"></div>
+        <div class="statusIndicator">
+          <div
+            class="dot"
+            id="dot"
+            tabindex="0"
+            role="img"
+            aria-label="Connection status"
+            aria-describedby="status"
+          ></div>
+          <div id="status" role="tooltip">Connecting&hellip;</div>
+        </div>
         <div class="brand">M.I.L.F <small>viewer</small></div>
         <div class="spacer"></div>
-        <button
-          type="button"
-          id="clipBtn"
-          aria-pressed="false"
-          aria-label="Enable clipboard scan watching"
-          title="Watch the clipboard and send EVE scans to the dashboard"
-        >
-          clip
-        </button>
         <button
           type="button"
           id="filterBtn"
@@ -649,30 +686,11 @@
         >
           mute
         </button>
-        <button type="button" id="clearBtn" aria-label="Clear the scan feed" title="Clear the feed">
-          clear
-        </button>
-        <button
-          type="button"
-          id="opBtn"
-          aria-label="Window transparency: default. Change to faint"
-          title="Cycle window transparency"
-        >
-          default
-        </button>
-        <button
-          type="button"
-          id="repairBtn"
-          aria-label="Forget this pairing and enter a new code"
-          title="Forget this pairing and enter a new code"
-        >
-          re-pair
-        </button>
         <button
           type="button"
           id="settingsBtn"
-          aria-label="Open alert settings"
-          title="Alert settings"
+          aria-label="Open viewer settings"
+          title="Viewer settings"
         >
           settings
         </button>
@@ -680,10 +698,6 @@
           &times;
         </button>
       </header>
-      <div id="statusRow">
-        <div id="status">Connecting&hellip;</div>
-        <button type="button" id="diagBtn" aria-label="Open connection diagnostics">details</button>
-      </div>
       <div
         id="liveStatus"
         class="status-visually-hidden"
@@ -772,11 +786,58 @@
       aria-hidden="true"
     >
       <header>
-        <div class="brand" id="settingsTitle">Alerts</div>
+        <div class="brand" id="settingsTitle">Settings</div>
         <div class="spacer"></div>
         <button type="button" id="settingsClose">back</button>
       </header>
       <form class="body" id="settingsForm">
+        <fieldset class="formGroup">
+          <legend>Viewer controls</legend>
+          <div class="viewerActions">
+            <button
+              type="button"
+              id="clipBtn"
+              aria-pressed="false"
+              aria-label="Enable clipboard scan watching"
+              title="Watch the clipboard and send EVE scans to the dashboard"
+            >
+              clipboard: off
+            </button>
+            <button
+              type="button"
+              id="opBtn"
+              aria-label="Window transparency: default. Change to faint"
+              title="Cycle window transparency"
+            >
+              default
+            </button>
+            <button
+              type="button"
+              id="clearBtn"
+              aria-label="Clear the scan feed"
+              title="Clear the feed"
+            >
+              clear feed
+            </button>
+            <button
+              type="button"
+              id="diagBtn"
+              aria-label="Open connection diagnostics"
+              title="Connection details, errors, and updates"
+            >
+              diagnostics
+            </button>
+            <button
+              type="button"
+              id="repairBtn"
+              class="wide"
+              aria-label="Forget this pairing and enter a new code"
+              title="Forget this pairing and enter a new code"
+            >
+              re-pair
+            </button>
+          </div>
+        </fieldset>
         <fieldset class="formGroup">
           <legend>Desktop alerts</legend>
           <label class="inline"

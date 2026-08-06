@@ -60,7 +60,6 @@ interface Elements {
   dot: HTMLElement;
   status: HTMLElement;
   liveStatus: HTMLElement;
-  statusRow: HTMLElement;
   pair: HTMLElement;
   pairErr: HTMLElement;
   filterPanel: HTMLElement;
@@ -133,6 +132,7 @@ export function startRenderer(
   const scanElements = new Map<string, ScanElements[]>();
   const bumps: Record<string, ActiveBump> = {};
   let activeOverlay: Overlay = null;
+  let diagnosticsReturnsToSettings = false;
   let detailScanId: string | null = null;
   let pairDismissible = false;
   let pairReturnFocus: HTMLElement | null = null;
@@ -414,14 +414,27 @@ export function startRenderer(
     if (activeOverlay !== "diagnostics") return;
     $("diagnostics").classList.remove("show");
     $("diagnostics").setAttribute("aria-hidden", "true");
+    if (restoreFocus && diagnosticsReturnsToSettings) {
+      diagnosticsReturnsToSettings = false;
+      activeOverlay = "settings";
+      $("settings").classList.add("show");
+      $("settings").removeAttribute("aria-hidden");
+      $("diagBtn").focus();
+      return;
+    }
+    diagnosticsReturnsToSettings = false;
     activeOverlay = null;
     setShellInert(false);
-    if (restoreFocus) $("diagBtn").focus();
+    if (restoreFocus) $("settingsBtn").focus();
   }
 
   function openDiagnostics(): void {
     if (activeOverlay === "detail") closeDetail(false);
-    if (activeOverlay === "settings") closeSettings(false);
+    diagnosticsReturnsToSettings = activeOverlay === "settings";
+    if (diagnosticsReturnsToSettings) {
+      $("settings").classList.remove("show");
+      $("settings").setAttribute("aria-hidden", "true");
+    }
     activeOverlay = "diagnostics";
     setShellInert(true);
     $("diagnostics").classList.add("show");
@@ -711,10 +724,10 @@ export function startRenderer(
   $("repairBtn").addEventListener("click", () => {
     void api.unpair().then(() => {
       paired = false;
-      showPair(true, false, $("repairBtn"));
+      showPair(true, false, $("settingsBtn"));
     });
   });
-  api.onRepair(() => showPair(true, paired, $("repairBtn")));
+  api.onRepair(() => showPair(true, paired, $("settingsBtn")));
 
   function numericPreference(input: HTMLInputElement): number | null {
     if (!input.value.trim()) return null;
@@ -845,6 +858,7 @@ export function startRenderer(
   function setClipButton(on: boolean): void {
     $("clipBtn").classList.toggle("armed", on);
     $("clipBtn").setAttribute("aria-pressed", String(on));
+    $("clipBtn").textContent = "clipboard: " + (on ? "on" : "off");
     $("clipBtn").setAttribute(
       "aria-label",
       (on ? "Disable" : "Enable") + " clipboard scan watching",
@@ -881,7 +895,10 @@ export function startRenderer(
     render();
     if (detailWasOpen) $("list").focus();
   }
-  $("clearBtn").addEventListener("click", clearScans);
+  $("clearBtn").addEventListener("click", () => {
+    clearScans();
+    closeSettings();
+  });
   api.onClear(clearScans);
 
   function paintBumps(): void {

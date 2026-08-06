@@ -39,6 +39,16 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     expect(await page.evaluate(() => typeof process)).toBe("undefined");
     expect(await page.evaluate(() => window.open("https://example.invalid"))).toBeNull();
     await expect(page).toHaveURL(/renderer\/index\.html$/);
+    await application.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      if (!window) throw new Error("viewer window missing");
+      window.setSize(280, 500);
+    });
+    expect(
+      await page
+        .locator("#appHeader")
+        .evaluate((header) => header.scrollWidth <= header.clientWidth),
+    ).toBe(true);
 
     await page.locator("#server").fill(dashboard.url);
     await page.locator("#code").fill("ABCD-EFGH");
@@ -61,7 +71,14 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     await expect(page.locator(".hull").first()).toHaveText(hostile);
     await expect(page.locator("img[src='x']")).toHaveCount(0);
     expect(await page.evaluate(() => document.body.dataset.pwned)).toBeUndefined();
-    await expect(page.locator("#status")).toContainText("last event");
+    const statusTooltip = page.locator("#status");
+    await expect(statusTooltip).not.toBeVisible();
+    await page.locator("#dot").hover();
+    await expect(statusTooltip).toBeVisible();
+    await expect(statusTooltip).toContainText("Live");
+    await expect(statusTooltip).toContainText("last event");
+    await page.locator("#dot").focus();
+    await expect(statusTooltip).toBeVisible();
 
     await page.locator("#filterBtn").click();
     await page.locator("#filterQuery").fill("Providence");
@@ -77,10 +94,14 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     await page.locator("#muteBtn").click();
     await expect(page.locator("#muteBtn")).toHaveAttribute("aria-pressed", "true");
 
+    await page.locator("#settingsBtn").click();
     await page.locator("#diagBtn").click();
     await expect(page.locator("#diagOrigin")).toHaveText(dashboard.url);
     await expect(page.locator("#diagVersion")).not.toHaveText("—");
     await page.locator("#diagnosticsClose").click();
+    await expect(page.locator("#settings")).toHaveClass(/show/);
+    await expect(page.locator("#diagBtn")).toBeFocused();
+    await page.locator("#settingsClose").click();
 
     dashboard.disconnectFeeds();
     await dashboard.waitForFeedCount(1);
@@ -93,6 +114,7 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     await expect(page.locator(".hull", { hasText: "duplicate" })).toHaveCount(0);
 
     await application.evaluate(({ clipboard }, value) => clipboard.writeText(value), "seeded text");
+    await page.locator("#settingsBtn").click();
     await page.locator("#clipBtn").click();
     await expect(page.locator("#clipBtn")).toHaveAttribute("aria-pressed", "true");
     await application.evaluate(
@@ -106,6 +128,7 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
       ({ clipboard }, value) => clipboard.writeText(value),
       originalClipboard,
     );
+    await page.locator("#settingsClose").click();
 
     const userData = await application.evaluate(({ app }) => app.getPath("userData"));
     const settingsText = await fs.readFile(path.join(userData, "settings.json"), "utf8");
@@ -130,6 +153,7 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     expect(restoredBounds).toEqual(savedBounds);
     await expect(page.locator("#pair")).not.toHaveClass(/show/);
     await expect(page.locator("#muteBtn")).toHaveAttribute("aria-pressed", "true");
+    await page.locator("#settingsBtn").click();
     await page.locator("#repairBtn").click();
     await expect(page.locator("#pair")).toHaveClass(/show/);
     await expect(page.locator("#pairCancel")).toBeHidden();
