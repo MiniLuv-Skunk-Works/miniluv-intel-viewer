@@ -4,25 +4,41 @@
   "version": "0.4.0",
   "private": true,
   "description": "MiniLuv Intel Live Feed - always-on-top scan viewer",
+  "engines": {
+    "node": ">=22 <23"
+  },
   "main": ".build/main.js",
   "scripts": {
     "build:code": "node scripts/build-code.mjs",
     "build:tests": "node scripts/build-code.mjs --tests",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,mjs,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,mjs,json,md,yml,yaml}\"",
     "prestart": "npm run build:code",
     "start": "electron .",
     "pretest": "npm run build:code && npm run build:tests",
-    "test": "node .build/tests/test-viewer.js && node .build/tests/test-security.js && node .build/tests/test-clipboard.js && node .build/tests/test-contracts.js && node .build/tests/test-dashboard-url.js && node .build/tests/test-credentials.js && node .build/tests/test-ipc-security.js && node .build/tests/test-dashboard-client.js && node .build/tests/test-feed-connection.js && node .build/tests/test-renderer.js && node .build/tests/test-settings-store.js && node .build/tests/test-window-placement.js",
+    "test:unit": "node --test --test-concurrency=1 .build/tests/test-*.js",
+    "test:electron": "playwright test --config playwright.config.ts",
+    "test:package": "playwright test --config playwright.package.config.ts",
+    "test": "npm run test:unit && npm run test:electron",
     "prebuild": "npm run build:code",
-    "build": "electron-builder --win --publish never"
+    "build": "electron-builder --win --publish never",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build && npm run test:package"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
     "@types/node": "^24.13.3",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.7",
     "esbuild": "^0.25.12",
+    "eslint": "^10.8.0",
+    "globals": "^17.9.0",
     "happy-dom": "^20.11.1",
-    "typescript": "^5.9.3"
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.66.0"
   },
   "build": {
     "appId": "space.miniluv.milfviewer",

@@ -57,6 +57,7 @@
       "at": 1754000005000,
       "by": "Fixture Bumper",
       "holdMs": 180000,
+      "remainingMs": 180000,
       "count": 1
     },
     "bumpCleared": {
@@ -76,6 +77,7 @@
       "at": 1754000005000,
       "by": "Fixture Bumper",
       "holdMs": 180000,
+      "remainingMs": 180000,
       "count": 1
     },
     "bumpClear": {
@@ -86,11 +88,7 @@
     },
     "vocabulary": {
       "buildNumber": 3448696,
-      "words": [
-        "damage",
-        "control",
-        "tritanium"
-      ]
+      "words": ["damage", "control", "tritanium"]
     }
   },
   "replay": {

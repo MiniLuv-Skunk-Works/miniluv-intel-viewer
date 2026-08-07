@@ -17,24 +17,24 @@ const SLOT_HEADER =
   /^(?:(?:high|med(?:ium)?|low)\s+power(?:\s+slots?)?|rig(?:\s+slots?)?s?|subsystem(?:\s+slots?)?s?)$/i;
 
 // Lines that look like an EVE inventory row.
-const QTY_TAB = /^[^\t]+\t[\d,]+(\t|$)/;        // Tritanium\t14,500,000
-const QTY_X = /^[\d,]+\s*x\s+\S/i;              // 5000 x Antimatter Charge L
-const QTY_LEAD = /^[\d,]+\s+\S/;                // 5000 Antimatter Charge L
-const BARE_ITEM = /^[A-Za-z][A-Za-z0-9 '\-.,/()]{2,60}$/;  // Damage Control II
+const QTY_TAB = /^[^\t]+\t[\d,]+(\t|$)/; // Tritanium\t14,500,000
+const QTY_X = /^[\d,]+\s*x\s+\S/i; // 5000 x Antimatter Charge L
+const QTY_LEAD = /^[\d,]+\s+\S/; // 5000 Antimatter Charge L
+const BARE_ITEM = /^[A-Za-z][A-Za-z0-9 '\-.,/()]{2,60}$/; // Damage Control II
 
 // Anything matching these is never sent, whatever else it looks like. These are
 // the shapes of things people copy that are none of the dashboard's business.
 const NEVER = [
-  /https?:\/\//i,                    // links
-  /^[\w.+-]+@[\w-]+\.\w+$/m,         // email addresses
-  /-----BEGIN [A-Z ]+-----/,         // keys and certificates
-  /\b[A-Za-z0-9_-]{32,}\b/,          // tokens, hashes, long secrets
+  /https?:\/\//i, // links
+  /^[\w.+-]+@[\w-]+\.\w+$/m, // email addresses
+  /-----BEGIN [A-Z ]+-----/, // keys and certificates
+  /\b[A-Za-z0-9_-]{32,}\b/, // tokens, hashes, long secrets
   // JSON, but not an EFT fit - those open with "[Obelisk, hauler]", so a bare
   // leading bracket is not enough to go on. Real JSON arrays open with an
   // object, a string or a number.
   /^\s*\{\s*["']/,
   /^\s*\[\s*[{"\d]/,
-  /^\s*(?:function|const|let|var|import|class|def|SELECT|<\?php)\b/mi,  // code
+  /^\s*(?:function|const|let|var|import|class|def|SELECT|<\?php)\b/im, // code
   /password|passwd|secret|api[_ -]?key|bearer/i,
 ];
 
@@ -45,7 +45,7 @@ export function isSlotHeader(line: unknown): boolean {
 export function looksLikeItemLine(line: string): boolean {
   const t = line.trim();
   if (!t) return false;
-  if (/^\[.*\]$/.test(t)) return true;              // [Obelisk, fit name]
+  if (/^\[.*\]$/.test(t)) return true; // [Obelisk, fit name]
   if (isSlotHeader(t)) return true;
   if (/^\[empty .* slot\]$/i.test(t)) return true;
   return QTY_TAB.test(t) || QTY_X.test(t) || QTY_LEAD.test(t) || BARE_ITEM.test(t);
@@ -57,8 +57,12 @@ export function looksLikeItemLine(line: string): boolean {
  * `vocabulary` is a Set of words that appear in real EVE item names, fetched
  * from the dashboard. Without it nothing is ever sent - see the note below.
  */
-export function classify(raw: unknown, vocabulary: ReadonlySet<string> | null): ClipboardCapture | null {
-  const text = String(raw ?? "");
+export function classify(
+  raw: unknown,
+  vocabulary: ReadonlySet<string> | null,
+): ClipboardCapture | null {
+  if (typeof raw !== "string") return null;
+  const text = raw;
   if (!text.trim()) return null;
   if (text.length > 64_000) return null;
 
@@ -66,7 +70,10 @@ export function classify(raw: unknown, vocabulary: ReadonlySet<string> | null): 
     if (pattern.test(text)) return null;
   }
 
-  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
   if (!lines.length) return null;
 
   // Shape alone is not enough, and this is the whole lesson of this filter.
@@ -91,7 +98,7 @@ export function classify(raw: unknown, vocabulary: ReadonlySet<string> | null): 
     if (!quantified) return null;
   }
 
-  const isFit = isSlotHeader(lines.find(l => !/^\[.*\]$/.test(l)) ?? lines[0]);
+  const isFit = isSlotHeader(lines.find((l) => !/^\[.*\]$/.test(l)) ?? lines[0]);
 
   let itemish = 0;
   let vocabHits = 0;
@@ -115,17 +122,20 @@ export function classify(raw: unknown, vocabulary: ReadonlySet<string> | null): 
  *  one EVE uses in an item name. */
 export function lineIsEveVocabulary(line: string, vocabulary: ReadonlySet<string>): boolean {
   let name = line.trim();
-  if (/^\[.*\]$/.test(name)) return true;          // [Obelisk, fit] / [empty slot]
+  if (/^\[.*\]$/.test(name)) return true; // [Obelisk, fit] / [empty slot]
   if (isSlotHeader(name)) return true;
 
-  name = name.split("\t")[0] ?? "";                // "Tritanium\t14,500,000"
-  name = name.replace(/^[\d,]+\s*x\s+/i, "");      // "5000 x Foo"
-  name = name.replace(/^[\d,]+\s+/, "");           // "5000 Foo"
-  name = name.replace(/\s+[\d,]+$/, "");           // "Foo 5000"
+  name = name.split("\t")[0] ?? ""; // "Tritanium\t14,500,000"
+  name = name.replace(/^[\d,]+\s*x\s+/i, ""); // "5000 x Foo"
+  name = name.replace(/^[\d,]+\s+/, ""); // "5000 Foo"
+  name = name.replace(/\s+[\d,]+$/, ""); // "Foo 5000"
 
-  const words = name.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 2);
+  const words = name
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 2);
   if (!words.length) return false;
-  return words.every(w => vocabulary.has(w));
+  return words.every((w) => vocabulary.has(w));
 }
 
 export { SLOT_HEADER };

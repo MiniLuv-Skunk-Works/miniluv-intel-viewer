@@ -7,19 +7,8 @@ import {
   type TimerHandle,
 } from "../settings-store";
 import { parseSettingsDocument, parseVocabulary, type Settings } from "../contracts";
-
-let pass = 0;
-let fail = 0;
-
-function ok(name: string, condition: unknown, detail?: unknown): void {
-  if (condition) {
-    pass += 1;
-    console.log("  PASS  " + name);
-  } else {
-    fail += 1;
-    console.log("  FAIL  " + name + (detail ? "  -> " + String(detail) : ""));
-  }
-}
+import { test } from "node:test";
+import { ok } from "./support/assertions";
 
 function codedError(code: string): Error & { code: string } {
   return Object.assign(new Error(code), { code });
@@ -52,8 +41,12 @@ class MemoryFileSystem implements AtomicFileSystem {
         this.events.push("write");
         this.files.set(file, data);
       },
-      sync: async () => { this.events.push("sync"); },
-      close: async () => { this.events.push("close"); },
+      sync: async () => {
+        this.events.push("sync");
+      },
+      close: async () => {
+        this.events.push("close");
+      },
     };
   }
 
@@ -119,76 +112,122 @@ async function run(): Promise<void> {
   const fs = new MemoryFileSystem();
   const timers = new FakeTimers();
   fs.files.set(file, JSON.stringify({ serverUrl: "https://dashboard.example", token: "legacy" }));
-  const store = new SettingsStore(file, parseSettingsDocument, { ...quiet, fileSystem: fs, timers });
+  const store = new SettingsStore(file, parseSettingsDocument, {
+    ...quiet,
+    fileSystem: fs,
+    timers,
+  });
   await store.initialize();
   store.patch({ opacity: 1 });
   await store.initialize();
   ok("settings are read only once", fs.reads === 1);
-  ok("reinitialization cannot discard newer in-memory settings",
-    store.get().serverUrl === "https://dashboard.example" && store.get().opacity === 1);
+  ok(
+    "reinitialization cannot discard newer in-memory settings",
+    store.get().serverUrl === "https://dashboard.example" && store.get().opacity === 1,
+  );
 
   store.scheduleSave({ x: 1, y: 2, width: 380, height: 460 }, ["token"]);
   store.scheduleSave({ x: 20, y: 30, width: 400, height: 500 });
   ok("rapid changes retain only one debounce timer", timers.active() === 1);
-  ok("memory updates immediately while disk waits", store.get().x === 20 && JSON.parse(fs.files.get(file)!).x === undefined);
+  ok(
+    "memory updates immediately while disk waits",
+    store.get().x === 20 && JSON.parse(fs.files.get(file)!).x === undefined,
+  );
   timers.runAll();
   await store.flush();
   const debounced = JSON.parse(fs.files.get(file)!) as Settings;
-  ok("debounced write stores the latest merged settings", debounced.x === 20 && debounced.height === 500);
+  ok(
+    "debounced write stores the latest merged settings",
+    debounced.x === 20 && debounced.height === 500,
+  );
   ok("removed settings do not return", !("token" in debounced));
-  ok("atomic order flushes before replacement",
-    fs.events.join(",").includes("open,write,sync,close,rename"), fs.events.join(","));
+  ok(
+    "atomic order flushes before replacement",
+    fs.events.join(",").includes("open,write,sync,close,rename"),
+    fs.events.join(","),
+  );
 
   const first = store.saveNow({ opacity: 1 });
   const second = store.saveNow({ opacity: 2 });
   await Promise.all([first, second]);
-  ok("serialized writes cannot restore an older snapshot", JSON.parse(fs.files.get(file)!).opacity === 2);
+  ok(
+    "serialized writes cannot restore an older snapshot",
+    JSON.parse(fs.files.get(file)!).opacity === 2,
+  );
 
   store.scheduleSave({ watchClipboard: true });
   await store.flush();
-  ok("flush persists a pending debounce immediately", JSON.parse(fs.files.get(file)!).watchClipboard === true && timers.active() === 0);
+  ok(
+    "flush persists a pending debounce immediately",
+    JSON.parse(fs.files.get(file)!).watchClipboard === true && timers.active() === 0,
+  );
 
   console.log("\n=== corrupt and interrupted files ===");
   const corruptFs = new MemoryFileSystem();
   corruptFs.files.set(file, "{truncated");
-  const corrupt = new SettingsStore(file, parseSettingsDocument, { ...quiet, fileSystem: corruptFs, timers: new FakeTimers() });
+  const corrupt = new SettingsStore(file, parseSettingsDocument, {
+    ...quiet,
+    fileSystem: corruptFs,
+    timers: new FakeTimers(),
+  });
   await corrupt.initialize();
   const diagnostic = [...corruptFs.files.keys()].find((name) => name.includes("settings.corrupt-"));
-  ok("malformed settings are preserved under a diagnostic name",
-    diagnostic !== undefined && corruptFs.files.get(diagnostic) === "{truncated" && !corruptFs.files.has(file));
+  ok(
+    "malformed settings are preserved under a diagnostic name",
+    diagnostic !== undefined &&
+      corruptFs.files.get(diagnostic) === "{truncated" &&
+      !corruptFs.files.has(file),
+  );
   await corrupt.saveNow({ opacity: 1 });
-  ok("a fresh valid file can be created after preservation", JSON.parse(corruptFs.files.get(file)!).opacity === 1);
+  ok(
+    "a fresh valid file can be created after preservation",
+    JSON.parse(corruptFs.files.get(file)!).opacity === 1,
+  );
 
   const blockedFs = new MemoryFileSystem();
   blockedFs.files.set(file, "[]");
   blockedFs.failCorruptCopy = true;
-  const blocked = new SettingsStore(file, parseSettingsDocument, { ...quiet, fileSystem: blockedFs });
+  const blocked = new SettingsStore(file, parseSettingsDocument, {
+    ...quiet,
+    fileSystem: blockedFs,
+  });
   await blocked.initialize();
   await blocked.saveNow({ opacity: 2 });
   ok("failed corrupt preservation blocks later overwrite", blockedFs.files.get(file) === "[]");
 
   const interruptedFs = new MemoryFileSystem();
   interruptedFs.files.set(file, JSON.stringify({ opacity: 1 }));
-  const interrupted = new SettingsStore(file, parseSettingsDocument, { ...quiet, fileSystem: interruptedFs });
+  const interrupted = new SettingsStore(file, parseSettingsDocument, {
+    ...quiet,
+    fileSystem: interruptedFs,
+  });
   await interrupted.initialize();
   interruptedFs.failAtomicRename = true;
   await interrupted.saveNow({ opacity: 2 });
-  ok("a failure before replace retains the last valid settings", JSON.parse(interruptedFs.files.get(file)!).opacity === 1);
-  ok("failed temporary writes are cleaned up", ![...interruptedFs.files.keys()].some((name) => name.endsWith(".tmp")));
+  ok(
+    "a failure before replace retains the last valid settings",
+    JSON.parse(interruptedFs.files.get(file)!).opacity === 1,
+  );
+  ok(
+    "failed temporary writes are cleaned up",
+    ![...interruptedFs.files.keys()].some((name) => name.endsWith(".tmp")),
+  );
 
   console.log("\n=== vocabulary cache uses the atomic path ===");
   const vocabularyPath = "C:\\profile\\vocabulary.json";
   const vocabularyFs = new MemoryFileSystem();
   vocabularyFs.files.set(vocabularyPath, JSON.stringify({ words: ["tritanium"] }));
-  const vocabulary = new AtomicJsonFile(vocabularyPath, parseVocabulary, { ...quiet, fileSystem: vocabularyFs });
+  const vocabulary = new AtomicJsonFile(vocabularyPath, parseVocabulary, {
+    ...quiet,
+    fileSystem: vocabularyFs,
+  });
   ok("valid vocabulary cache loads", (await vocabulary.load())?.words[0] === "tritanium");
   vocabularyFs.failAtomicRename = true;
   await vocabulary.write({ words: ["obelisk"] });
-  ok("interrupted vocabulary refresh retains the previous cache",
-    JSON.parse(vocabularyFs.files.get(vocabularyPath)!).words[0] === "tritanium");
-
-  console.log(`\n${fail ? `FAILED: ${fail}` : "ALL " + pass + " PASSED"}`);
-  if (fail) process.exit(1);
+  ok(
+    "interrupted vocabulary refresh retains the previous cache",
+    JSON.parse(vocabularyFs.files.get(vocabularyPath)!).words[0] === "tritanium",
+  );
 }
 
-void run();
+test("atomic settings and vocabulary persistence", run);

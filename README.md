@@ -13,23 +13,38 @@ The download is a self-contained portable `.exe`; there is no installer and the
 target machine does not need Node.js.
 
 > [!NOTE]
-> Windows SmartScreen may show **Windows protected your PC** because the
-> executable is not code-signed. Select **More info**, then **Run anyway**.
+> Windows SmartScreen can show **Windows protected your PC** because the
+> executable is not code-signed. Verify the download, select **More info**, and
+> then select **Run anyway**.
+
+### Verify a download
+
+Each release includes a SHA-256 checksum beside the executable. For a stable
+release, replace `<version>` with the version downloaded; for a continuous
+build, use `MILF-Viewer-latest.exe`.
+
+```powershell
+$download = "MILF-Viewer-<version>.exe"
+$expected = ((Get-Content "$download.sha256" -Raw) -split '\s+')[0]
+$actual = (Get-FileHash $download -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -cne $expected) { throw "SHA-256 checksum mismatch for $download" }
+```
+
+GitHub also records signed build provenance for stable and continuous
+executables. Stable releases include an SPDX JSON software bill of materials
+and an SBOM attestation. See [RELEASING.md](RELEASING.md) for the complete
+verification commands.
 
 ## Setup
 
 1. Download and run the viewer.
 2. Open the MiniLuv dashboard and select **Pair viewer**.
 3. Enter the dashboard address and one-time pairing code in the viewer.
-4. New scans will appear as they are posted.
+4. New scans appear as they are posted.
 
 The viewer remembers its dashboard address, encrypted pairing credential,
 window position, and opacity under `%APPDATA%\milf-viewer`. Use **Re-pair** in
-the header or tray menu to connect it to a different dashboard. Settings and
-the clipboard vocabulary cache are replaced atomically; an unreadable file is
-retained with a `.corrupt-<timestamp>` name for diagnosis. Saved window
-placement is tied to its display and clamped to an attached display when the
-monitor layout, resolution, or DPI changes.
+viewer settings or the tray menu to connect it to another dashboard.
 
 ## Features
 
@@ -37,159 +52,106 @@ monitor layout, resolution, or DPI changes.
 - Expandable fit and cargo details
 - Always-on-top, resizable Windows overlay with three opacity levels
 - Per-scan bump controls and locally counted countdown timers
-- Tray controls for showing, clearing, repositioning, and re-pairing the viewer
+- Tray controls for showing, clearing, repositioning, and re-pairing
 - Optional clipboard watching for EVE fits and cargo lists
+- Replay recovery after brief network interruptions
+- Connection freshness, last-event time, and privacy-safe diagnostics
+- Independent compact feed filters using text and minimum split value
+- Opt-in desktop alerts with quiet hours, persistent mute, and configurable
+  split-value, hull, system, or route conditions
+- Stable-release awareness with release notes and a deliberate browser download action
 - Single-instance behavior so duplicate launches focus the existing window
 
-## Clipboard privacy
+## Privacy and security
 
-Clipboard watching is **off by default** and is visibly indicated when enabled.
-Classification happens inside the viewer before any network request is made.
-The filter rejects secrets, URLs, email addresses, source code, prose, and data
-that does not match the EVE item vocabulary supplied by the paired dashboard.
-If that vocabulary is unavailable, the filter fails closed and sends nothing.
+Clipboard watching is **off by default** and visibly indicated when enabled.
+Classification happens locally before any request is made. The filter rejects
+secrets, URLs, email addresses, source code, prose, and content that does not
+match the paired dashboard's EVE item vocabulary. If the vocabulary is
+unavailable, the filter fails closed and sends nothing.
+
+Desktop alerts are also **off by default**. Alert matching happens locally and
+is independent of visible-feed filters. Notifications use generic lock-screen
+text unless **Show intel details on the lock screen** is explicitly enabled.
+Retained and replayed scans never produce desktop alerts.
+
+The renderer is sandboxed, has no Node.js integration, and communicates through
+a narrow typed preload bridge. Pairing credentials are encrypted with Electron
+`safeStorage` and never exposed to renderer JavaScript. Authenticated traffic
+requires HTTPS except for an explicit loopback-only development switch.
+
+The viewer checks GitHub for the latest stable release at most once per day. It
+does not download, execute, or replace the application. The download action
+opens only this repository's validated GitHub release page in the system
+browser; users should still verify the published checksum and provenance.
+
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 ## Development
 
 Requirements:
 
 - Windows 10 or later
-- Node.js 22
+- Node.js 22.x
 - npm
 
-Install dependencies and run from source:
+Electron 43 bundles Node.js 24 for the packaged runtime. Contributors and CI
+still use Node.js 22 as declared by `package.json`.
+
+Install the locked dependencies and run from source:
 
 ```powershell
 npm ci
 npm start
 ```
 
-Dashboard addresses must use HTTPS. For a loopback-only development dashboard,
-plain HTTP can be enabled for that launch without changing stored settings:
+Run the normal tests during development:
 
 ```powershell
-npm start -- --allow-insecure-localhost
-```
-
-The exception accepts only `localhost`, `127.0.0.0/8`, and `::1`; private-LAN
-and public HTTP addresses remain blocked.
-
-### Runtime support policy
-
-The viewer currently targets Electron 43.2.x (Chromium 150 and Node.js 24).
-Electron supports its latest three stable major versions, so maintainers should
-review each stable Electron release and upgrade before the installed major
-reaches end of life. Electron 43 reaches end of life on January 5, 2027. Patch
-and minor updates within the selected major are accepted through the package
-range and locked by `package-lock.json`.
-
-Type-check the application and tests, then run the portable test suite:
-
-```powershell
-npm run typecheck
 npm test
 ```
 
-Development, tests, and packaging compile TypeScript into the ignored
-`.build\` directory automatically. Generated JavaScript is disposable and
-must not be committed.
-
-The clipboard tests can additionally compare their slot-header rule with a
-dashboard checkout when `DASHBOARD_CORE_PARSER` points to the dashboard's
-`packages/core/src/parsing/index.ts` file.
-
-### Dashboard protocol compatibility
-
-This viewer supports dashboard protocol version 1. A version-1 dashboard with
-all five known capabilities (`scan-feed`, `bump-control`, `clipboard-relay`,
-`clipboard-vocabulary`, and `scan-replay`) is fully compatible. Unknown
-capability names are ignored so dashboards can add optional features
-independently.
-
-Compatibility is deliberately friendly to independent releases:
-
-- A dashboard hello without `protocolVersion` or `capabilities` is treated as
-  legacy. Existing feed, bump, and clipboard behavior remains available.
-- A version-1 dashboard that omits a known capability remains connected, while
-  the corresponding optional viewer operation is unavailable.
-- A dashboard with a newer protocol version still supplies the basic scan
-  feed. The viewer shows a compact warning and disables writes and clipboard
-  relay until that protocol version is supported.
-- Adding fields does not require a protocol version increase. Semantic changes
-  do, and new optional behavior should be advertised as a capability.
-
-Dashboards advertising `scan-replay` put the stable scan ID in each scan SSE
-frame's `id` field. The viewer retains validated IDs in memory for the current
-pairing, sends the latest HTTP-header-safe one as `Last-Event-ID` after a
-network interruption, and suppresses duplicate replayed/live scan IDs. If an
-ID cannot be represented verbatim in Node's HTTP header, the previous cursor
-requests a wider replay and deduplication removes the overlap. The cursor is
-not written to disk, so starting the app or changing pairings requests the
-dashboard's normal retained snapshot. A `hello.replay.status` of
-`cursor-expired` means the dashboard no longer has the requested position; the
-viewer warns about the unrecoverable gap while accepting the complete retained
-window that follows. Bump events never advance the scan cursor.
-
-The viewer has no runtime dependency on dashboard source or packages. It keeps
-a self-contained representative fixture at
-`tests/fixtures/viewer-protocol-v1.json`. To exercise a dashboard checkout's
-portable fixture through the viewer parsers, run:
+Before publishing or merging release-affecting changes, run the complete gate:
 
 ```powershell
-$env:DASHBOARD_VIEWER_PROTOCOL_FIXTURE = "D:\path\to\dashboard\packages\contracts\fixtures\viewer-protocol-v1.json"
-npm test
-Remove-Item Env:DASHBOARD_VIEWER_PROTOCOL_FIXTURE
+npm run verify
 ```
 
-Build the portable executable:
+The full gate checks formatting, lint rules, and TypeScript types; runs Node and
+real-Electron tests; builds `dist\MILF-Viewer-<version>.exe`; and launches the
+packaged artifact for a render-and-quit smoke test.
 
-```powershell
-npm run build
-```
+For detailed setup, packaging, troubleshooting, and manual Windows checks, see
+[BUILD.md](BUILD.md). Outside contributors should also read
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
-The artifact is written to `dist\MILF-Viewer-<version>.exe`. Close any running
-copy of MILF Viewer before rebuilding so Windows releases the existing file.
+## Architecture and protocol
+
+Electron's main process owns credentials, networking, clipboard access,
+persistence, and native windows. A context-isolated preload bridge exposes only
+validated viewer operations to the sandboxed renderer. The viewer pairs over
+bounded JSON requests and consumes a capability-negotiated SSE feed with replay
+cursor and duplicate suppression.
+
+The viewer supports dashboard protocol version 1, remains usable with legacy
+dashboards, disables unsafe writes for newer protocol versions, and has no
+runtime dependency on dashboard source packages. See
+[ARCHITECTURE.md](ARCHITECTURE.md) for component responsibilities, trust
+boundaries, data flow, protocol capabilities, replay behavior, and compatibility
+rules.
 
 ## Release automation
 
-GitHub Actions handles the build paths:
+GitHub Actions builds pull requests, updates a rolling `continuous` prerelease
+from `main`, and creates stable releases from exact `v<package.json version>`
+tags whose commits are part of `main`. Stable releases contain the executable,
+checksum, SPDX SBOM, and attestations. Build/test jobs are read-only, and
+publication happens in separate least-privilege jobs.
 
-- Pull requests targeting `main` run the tests, build the Windows executable,
-  and retain it as a workflow artifact for 14 days.
-- Pushes to `main` update the rolling `continuous` prerelease and its stable
-  `MILF-Viewer-latest.exe` download URL.
-- Tags matching `v*` build a versioned stable release.
+See [RELEASING.md](RELEASING.md) for the canonical release procedure.
 
-See [RELEASING.md](RELEASING.md) for release notes, signing considerations, and
-manual recovery steps.
+## Project policies
 
-## Project layout
-
-| Path | Purpose |
-| --- | --- |
-| `main.ts` | Electron lifecycle, pairing orchestration, tray, and clipboard polling |
-| `preload.ts` | Narrow, typed IPC bridge exposed to the sandboxed renderer |
-| `contracts.ts` | Shared IPC/domain types and runtime boundary parsers |
-| `dashboard-client.ts` | Bounded, cancellable JSON requests with normalized failures |
-| `feed-connection.ts` | Single-owner SSE connection, parsing, replay cursor/deduplication, idle detection, and jittered retry |
-| `dashboard-url.ts` | HTTPS and explicit loopback-development origin policy |
-| `credentials.ts` | OS-encrypted bearer credential storage and migration |
-| `settings-store.ts` | In-memory settings plus debounced, atomic JSON persistence |
-| `window-placement.ts` | Display-aware bounds capture, restoration, clamping, and Reset logic |
-| `ipc-security.ts` | Viewer-window and main-frame IPC authorization |
-| `validation.ts` | Central string, list, timestamp, and numeric bounds |
-| `renderer/` | TypeScript viewer interface, static HTML, icons, and live countdown behavior |
-| `clipboard-filter.ts` | Local, fail-closed fit and cargo classifier |
-| `tests/*.ts` | Portable behavior, security, clipboard, and contract checks |
-| `scripts/build-code.mjs` | Disposable esbuild production/test compilation |
-| `.github/workflows/` | PR, continuous, and stable release automation |
-
-## Security model
-
-The renderer uses context isolation, disables Node integration, enables the
-Electron sandbox, blocks navigation and new windows, and enforces a Content
-Security Policy. The pairing token is never exposed to renderer JavaScript or
-stored as plaintext: Electron `safeStorage` protects `credential.bin` with the
-Windows user account's DPAPI key. Authenticated traffic requires HTTPS except
-for the explicit loopback-only development switch. The viewer is a separate
-desktop application and does not inject code into EVE.
+- [MIT License](LICENSE)
+- [Contributing](CONTRIBUTING.md)
+- [Security and supported versions](SECURITY.md)

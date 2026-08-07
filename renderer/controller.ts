@@ -1,11 +1,16 @@
-import type {
-  ActiveBump,
-  ConnectionState,
-  ConnectionStatus,
-  OpacityLevel,
-  Scan,
-  ViewerApi,
+import {
+  defaultUserPreferences,
+  type ActiveBump,
+  type ConnectionState,
+  type ConnectionStatus,
+  type DiagnosticsSnapshot,
+  type OpacityLevel,
+  type Scan,
+  type ViewerApi,
+  type UserPreferences,
+  type UpdateInfo,
 } from "../contracts";
+import { scanMatchesFilter } from "../alerting";
 
 export interface RendererRuntime {
   dateNow(): number;
@@ -38,14 +43,48 @@ interface Elements {
   repairBtn: HTMLButtonElement;
   clipBtn: HTMLButtonElement;
   clearBtn: HTMLButtonElement;
+  filterBtn: HTMLButtonElement;
+  muteBtn: HTMLButtonElement;
+  settingsBtn: HTMLButtonElement;
+  diagBtn: HTMLButtonElement;
+  filterClear: HTMLButtonElement;
+  settingsClose: HTMLButtonElement;
+  diagnosticsClose: HTMLButtonElement;
+  settingsSave: HTMLButtonElement;
+  checkUpdateBtn: HTMLButtonElement;
+  openUpdateBtn: HTMLButtonElement;
   detailTitle: HTMLElement;
   detailBody: HTMLElement;
   detail: HTMLElement;
   list: HTMLElement;
   dot: HTMLElement;
   status: HTMLElement;
+  liveStatus: HTMLElement;
   pair: HTMLElement;
   pairErr: HTMLElement;
+  filterPanel: HTMLElement;
+  filterQuery: HTMLInputElement;
+  filterValue: HTMLInputElement;
+  settings: HTMLElement;
+  settingsForm: HTMLFormElement;
+  settingsErr: HTMLElement;
+  alertsEnabled: HTMLInputElement;
+  alertValue: HTMLInputElement;
+  alertHulls: HTMLInputElement;
+  alertSystems: HTMLInputElement;
+  alertRoutes: HTMLInputElement;
+  sensitiveAlerts: HTMLInputElement;
+  quietEnabled: HTMLInputElement;
+  quietStart: HTMLInputElement;
+  quietEnd: HTMLInputElement;
+  diagnostics: HTMLElement;
+  diagVersion: HTMLElement;
+  diagOrigin: HTMLElement;
+  diagState: HTMLElement;
+  diagLastEvent: HTMLElement;
+  diagnosticErrors: HTMLElement;
+  updateSummary: HTMLElement;
+  releaseNotes: HTMLElement;
 }
 
 interface ScanElements {
@@ -57,7 +96,7 @@ interface ScanElements {
   bumpWho: HTMLElement;
 }
 
-type Overlay = "detail" | "pair" | null;
+type Overlay = "detail" | "pair" | "settings" | "diagnostics" | null;
 
 export function startRenderer(
   api: ViewerApi,
@@ -93,6 +132,7 @@ export function startRenderer(
   const scanElements = new Map<string, ScanElements[]>();
   const bumps: Record<string, ActiveBump> = {};
   let activeOverlay: Overlay = null;
+  let diagnosticsReturnsToSettings = false;
   let detailScanId: string | null = null;
   let pairDismissible = false;
   let pairReturnFocus: HTMLElement | null = null;
@@ -100,6 +140,11 @@ export function startRenderer(
   let protocolNotice: ConnectionStatus | null = null;
   let clipMsgTimer: number | null = null;
   let bumpErrTimer: number | null = null;
+  let noticeTimer: number | null = null;
+  let preferences: UserPreferences = defaultUserPreferences();
+  let currentStatus: ConnectionStatus = { state: "connecting" };
+  let currentUpdate: UpdateInfo = { status: "unknown", currentVersion: "unknown" };
+  let visibleNotice: string | null = null;
 
   function isk(n: number | null | undefined): string | null {
     if (n == null || isNaN(n)) return null;
@@ -126,8 +171,13 @@ export function startRenderer(
     return Math.floor(minutes / 60) + "h " + (minutes % 60) + "m";
   }
   function scanName(scan: Scan): string {
-    return [scan.hull || "Unknown", scan.pilot ? "pilot " + scan.pilot : null,
-      scan.system ? "in " + scan.system : null].filter(Boolean).join(", ");
+    return [
+      scan.hull || "Unknown",
+      scan.pilot ? "pilot " + scan.pilot : null,
+      scan.system ? "in " + scan.system : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
   }
   function addKv(parent: DocumentFragment, key: string, value: string | null | undefined): void {
     if (!value) return;
@@ -165,30 +215,62 @@ export function startRenderer(
     const body = doc.createDocumentFragment();
     addKv(body, "Scout", scan.scout);
     addKv(body, "Pilot", scan.pilot);
-    addKv(body, "Route", [scan.scanGate ? scan.scanGate + " gate" : null,
-      scan.headGate ? "\u2192 " + scan.headGate : null].filter(Boolean).join("  "));
-    addKv(body, "Value", [isk(scan.valueSplit) ? isk(scan.valueSplit) + " split" : null,
-      isk(scan.valueSell) ? isk(scan.valueSell) + " sell" : null,
-      isk(scan.valueBuy) ? isk(scan.valueBuy) + " buy" : null].filter(Boolean).join("  /  "));
+    addKv(
+      body,
+      "Route",
+      [
+        scan.scanGate ? scan.scanGate + " gate" : null,
+        scan.headGate ? "\u2192 " + scan.headGate : null,
+      ]
+        .filter(Boolean)
+        .join("  "),
+    );
+    addKv(
+      body,
+      "Value",
+      [
+        isk(scan.valueSplit) ? isk(scan.valueSplit) + " split" : null,
+        isk(scan.valueSell) ? isk(scan.valueSell) + " sell" : null,
+        isk(scan.valueBuy) ? isk(scan.valueBuy) + " buy" : null,
+      ]
+        .filter(Boolean)
+        .join("  /  "),
+    );
     addKv(body, "Droppable", isk(scan.droppableSplit) ? isk(scan.droppableSplit) + " split" : "");
-    addKv(body, "Tank", ehpFmt(scan.ehp)
-      ? ehpFmt(scan.ehp) + " EHP" + (scan.ammo ? " vs " + scan.ammo : "") : "");
+    addKv(
+      body,
+      "Tank",
+      ehpFmt(scan.ehp) ? ehpFmt(scan.ehp) + " EHP" + (scan.ammo ? " vs " + scan.ammo : "") : "",
+    );
     const fleet = scan.fleetAll || [];
     if (fleet.length) {
-      const title = "Fleet needed" + (scan.sec ? " \u2014 " + scan.sec + ", " + (scan.prepped || "") : "");
-      addSection(body, title, fleet.map((entry) =>
-        String(entry.name).padEnd(9) + String(entry.ships).padStart(4)).join("\n"));
+      const title =
+        "Fleet needed" + (scan.sec ? " \u2014 " + scan.sec + ", " + (scan.prepped || "") : "");
+      addSection(
+        body,
+        title,
+        fleet
+          .map((entry) => String(entry.name).padEnd(9) + String(entry.ships).padStart(4))
+          .join("\n"),
+      );
     }
     if (scan.fitEft) addSection(body, "Fit \u2014 paste into Pyfa", scan.fitEft);
     const cargo = scan.cargoList || [];
     if (cargo.length) {
-      addSection(body, "Cargo", cargo.map((entry) =>
-        Number(entry.qty).toLocaleString().padStart(11) + "  " + entry.name).join("\n"));
+      addSection(
+        body,
+        "Cargo",
+        cargo
+          .map((entry) => Number(entry.qty).toLocaleString().padStart(11) + "  " + entry.name)
+          .join("\n"),
+      );
     }
     if (scan.notes) addSection(body, "Notes", scan.notes);
     if (!scan.fitEft && !cargo.length) {
-      body.append(element("h3", undefined, "Fit & cargo"),
-        element("div", "kv missing", "Not included in this scan."));
+      body.append(
+        element("h3", undefined, "Fit & cargo"),
+        element("div", "kv missing", "Not included in this scan."),
+      );
     }
     $("detailBody").replaceChildren(body);
     $("detailBody").setAttribute("aria-label", "Details for " + scanName(scan));
@@ -208,7 +290,7 @@ export function startRenderer(
     activeOverlay = null;
     setShellInert(false);
     if (restoreFocus) {
-      const firstRendered = scanElements.values().next().value as ScanElements[] | undefined;
+      const firstRendered = scanElements.values().next().value;
       const target = pairReturnFocus?.isConnected ? pairReturnFocus : firstRendered?.[0]?.open;
       (target ?? $("list")).focus();
     }
@@ -220,10 +302,15 @@ export function startRenderer(
       return;
     }
     if (activeOverlay === "detail") closeDetail(false);
+    if (activeOverlay === "settings") closeSettings(false);
+    if (activeOverlay === "diagnostics") closeDiagnostics(false);
     pairDismissible = dismissible;
     const activeElement = doc.activeElement;
-    pairReturnFocus = returnFocus ?? (activeElement && activeElement !== doc.body
-      ? activeElement as HTMLElement : $("repairBtn"));
+    pairReturnFocus =
+      returnFocus ??
+      (activeElement && activeElement !== doc.body
+        ? (activeElement as HTMLElement)
+        : $("repairBtn"));
     $("pairCancel").hidden = !dismissible;
     activeOverlay = "pair";
     setShellInert(true);
@@ -232,11 +319,141 @@ export function startRenderer(
     $("server").focus();
   }
 
-  const focusableSelector = ["button:not([disabled])", "input:not([disabled])", "[href]",
-    "[tabindex]:not([tabindex=\"-1\"])",].join(",");
+  function closeSettings(restoreFocus = true): void {
+    if (activeOverlay !== "settings") return;
+    $("settings").classList.remove("show");
+    $("settings").setAttribute("aria-hidden", "true");
+    activeOverlay = null;
+    setShellInert(false);
+    if (restoreFocus) $("settingsBtn").focus();
+  }
+
+  function minutesText(minutes: number): string {
+    return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  }
+
+  function inputMinutes(value: string): number | null {
+    const match = /^(\d\d):(\d\d)$/.exec(value);
+    if (!match) return null;
+    const minutes = Number(match[1]) * 60 + Number(match[2]);
+    return minutes >= 0 && minutes < 1_440 ? minutes : null;
+  }
+
+  function preferenceList(value: string): string[] {
+    const seen = new Set<string>();
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => {
+        const key = item.toLocaleLowerCase();
+        if (!item || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+
+  function fillSettings(): void {
+    const alerts = preferences.alerts;
+    $("alertsEnabled").checked = alerts.enabled;
+    $("alertValue").value =
+      alerts.minimumSplitValue === null ? "" : String(alerts.minimumSplitValue);
+    $("alertHulls").value = alerts.hulls.join(", ");
+    $("alertSystems").value = alerts.systems.join(", ");
+    $("alertRoutes").value = alerts.routes.join(", ");
+    $("sensitiveAlerts").checked = alerts.includeSensitiveDetails;
+    $("quietEnabled").checked = alerts.quietHours.enabled;
+    $("quietStart").value = minutesText(alerts.quietHours.startMinute);
+    $("quietEnd").value = minutesText(alerts.quietHours.endMinute);
+    $("settingsErr").textContent = "";
+  }
+
+  function openSettings(): void {
+    if (activeOverlay === "detail") closeDetail(false);
+    if (activeOverlay === "diagnostics") closeDiagnostics(false);
+    fillSettings();
+    activeOverlay = "settings";
+    setShellInert(true);
+    $("settings").classList.add("show");
+    $("settings").removeAttribute("aria-hidden");
+    $("settingsClose").focus();
+  }
+
+  function renderUpdate(update: UpdateInfo): void {
+    currentUpdate = update;
+    const summary = {
+      unknown: `Current version ${update.currentVersion}.`,
+      checking: "Checking for a stable release…",
+      "up-to-date": `Up to date (${update.currentVersion}).`,
+      available: `Version ${update.latestVersion ?? "unknown"} is available.`,
+      error: update.error || "The release check failed.",
+    }[update.status];
+    $("updateSummary").textContent = summary;
+    $("releaseNotes").textContent = update.notes || "";
+    $("releaseNotes").hidden = !update.notes;
+    $("openUpdateBtn").hidden = update.status !== "available" || !update.releaseUrl;
+    $("checkUpdateBtn").disabled = update.status === "checking";
+  }
+
+  function renderDiagnostics(snapshot: DiagnosticsSnapshot): void {
+    $("diagVersion").textContent = snapshot.appVersion;
+    $("diagOrigin").textContent = snapshot.serverOrigin || "Not paired";
+    $("diagState").textContent = snapshot.connection.state;
+    $("diagLastEvent").textContent = snapshot.connection.lastEventAt
+      ? new Date(snapshot.connection.lastEventAt).toLocaleString()
+      : "Never";
+    const entries = snapshot.errors.length
+      ? snapshot.errors.map((error) =>
+          element("li", undefined, `${new Date(error.at).toLocaleTimeString()} — ${error.message}`),
+        )
+      : [element("li", undefined, "None")];
+    $("diagnosticErrors").replaceChildren(...entries);
+    renderUpdate(snapshot.update);
+  }
+
+  function closeDiagnostics(restoreFocus = true): void {
+    if (activeOverlay !== "diagnostics") return;
+    $("diagnostics").classList.remove("show");
+    $("diagnostics").setAttribute("aria-hidden", "true");
+    if (restoreFocus && diagnosticsReturnsToSettings) {
+      diagnosticsReturnsToSettings = false;
+      activeOverlay = "settings";
+      $("settings").classList.add("show");
+      $("settings").removeAttribute("aria-hidden");
+      $("diagBtn").focus();
+      return;
+    }
+    diagnosticsReturnsToSettings = false;
+    activeOverlay = null;
+    setShellInert(false);
+    if (restoreFocus) $("settingsBtn").focus();
+  }
+
+  function openDiagnostics(): void {
+    if (activeOverlay === "detail") closeDetail(false);
+    diagnosticsReturnsToSettings = activeOverlay === "settings";
+    if (diagnosticsReturnsToSettings) {
+      $("settings").classList.remove("show");
+      $("settings").setAttribute("aria-hidden", "true");
+    }
+    activeOverlay = "diagnostics";
+    setShellInert(true);
+    $("diagnostics").classList.add("show");
+    $("diagnostics").removeAttribute("aria-hidden");
+    $("diagnosticsClose").focus();
+    void api.diagnostics().then(renderDiagnostics);
+    renderUpdate(currentUpdate);
+  }
+
+  const focusableSelector = [
+    "button:not([disabled])",
+    "input:not([disabled])",
+    "[href]",
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(",");
   function focusableWithin(root: HTMLElement): HTMLElement[] {
-    return Array.from(root.querySelectorAll<HTMLElement>(focusableSelector)).filter((node) =>
-      !node.hidden && node.getAttribute("aria-hidden") !== "true");
+    return Array.from(root.querySelectorAll<HTMLElement>(focusableSelector)).filter(
+      (node) => !node.hidden && node.getAttribute("aria-hidden") !== "true",
+    );
   }
   function onDocumentKeydown(event: KeyboardEvent): void {
     if (!activeOverlay) return;
@@ -244,14 +461,27 @@ export function startRenderer(
       if (activeOverlay === "detail") {
         event.preventDefault();
         closeDetail();
-      } else if (pairDismissible) {
+      } else if (activeOverlay === "pair" && pairDismissible) {
         event.preventDefault();
         closePair();
+      } else if (activeOverlay === "settings") {
+        event.preventDefault();
+        closeSettings();
+      } else if (activeOverlay === "diagnostics") {
+        event.preventDefault();
+        closeDiagnostics();
       }
       return;
     }
     if (event.key !== "Tab") return;
-    const root = activeOverlay === "detail" ? $("detail") : $("pair");
+    const root =
+      activeOverlay === "detail"
+        ? $("detail")
+        : activeOverlay === "settings"
+          ? $("settings")
+          : activeOverlay === "diagnostics"
+            ? $("diagnostics")
+            : $("pair");
     const focusable = focusableWithin(root);
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
@@ -312,16 +542,29 @@ export function startRenderer(
       const fleetRow = element("div", "fleet");
       fleet.forEach((entry, index) => {
         if (index) fleetRow.append(doc.createTextNode("  "));
-        fleetRow.append(element("b", undefined, String(entry.ships)), doc.createTextNode(" " + entry.name));
+        fleetRow.append(
+          element("b", undefined, String(entry.ships)),
+          doc.createTextNode(" " + entry.name),
+        );
       });
       open.append(fleetRow);
     }
-    const route = [scan.scanGate ? scan.scanGate + " gate" : null,
-      scan.headGate ? "\u2192 " + scan.headGate : null].filter(Boolean).join("  ");
+    const route = [
+      scan.scanGate ? scan.scanGate + " gate" : null,
+      scan.headGate ? "\u2192 " + scan.headGate : null,
+    ]
+      .filter(Boolean)
+      .join("  ");
     if (route) open.append(element("div", "meta", route));
-    open.append(element("div", "meta", (scan.scout || "?") +
-      (scan.system ? " \u00B7 scanned in " + scan.system : "") +
-      (scan.sec ? " \u00B7 " + scan.sec + " " + (scan.prepped || "") : "")));
+    open.append(
+      element(
+        "div",
+        "meta",
+        (scan.scout || "?") +
+          (scan.system ? " \u00B7 scanned in " + scan.system : "") +
+          (scan.sec ? " \u00B7 " + scan.sec + " " + (scan.prepped || "") : ""),
+      ),
+    );
     if (scan.notes) open.append(element("div", "notes", scan.notes));
     open.addEventListener("click", () => openDetail(scan.id));
     open.addEventListener("keydown", (event) => {
@@ -345,8 +588,13 @@ export function startRenderer(
       list.replaceChildren(element("div", "empty", "Waiting for scans\u2026"));
       return;
     }
+    const visible = scans.filter((scan) => scanMatchesFilter(scan, preferences.filters));
+    if (!visible.length) {
+      list.replaceChildren(element("div", "empty", "No scans match the active filters."));
+      return;
+    }
     const fragment = doc.createDocumentFragment();
-    scans.forEach((scan) => fragment.append(createScan(scan)));
+    visible.forEach((scan) => fragment.append(createScan(scan)));
     list.replaceChildren(fragment);
     paintBumps();
     tick();
@@ -357,31 +605,71 @@ export function startRenderer(
       const age = now - Number(scan.at);
       scanElements.get(scan.id)?.forEach((rendered) => {
         rendered.age.textContent = ageText(age);
-        rendered.age.className = "age" + (age > 15 * 60e3 ? " dead" : age > 5 * 60e3 ? " stale" : "");
+        rendered.age.className =
+          "age" + (age > 15 * 60e3 ? " dead" : age > 5 * 60e3 ? " stale" : "");
       });
     });
+    paintConnectionStatus();
   }
   every(tick, 1000);
 
+  function paintConnectionStatus(): void {
+    const age = currentStatus.lastEventAt
+      ? ` · last event ${ageText(runtime.dateNow() - currentStatus.lastEventAt)} ago`
+      : " · no events yet";
+    const label = {
+      live: "Live",
+      connecting: "Connecting…",
+      reconnecting: "Reconnecting",
+      replaying: "Replaying retained scans",
+      stale: "Stale",
+      offline: "Offline",
+      error: "Error",
+      unpaired: "Not paired",
+      clip: "Live",
+      warn: "Warning",
+    }[currentStatus.state];
+    $("status").textContent = visibleNotice
+      ? `${label} · ${visibleNotice}`
+      : label + age + (currentStatus.detail ? ` · ${currentStatus.detail}` : "");
+  }
+
   function setStatus(status: ConnectionStatus): void {
-    let shown = status;
+    let shown =
+      status.lastEventAt === undefined && currentStatus.lastEventAt !== undefined
+        ? { ...status, lastEventAt: currentStatus.lastEventAt }
+        : status;
     if (shown.compatibility) protocolNotice = shown.state === "warn" ? shown : null;
     else if (shown.state === "live" && protocolNotice) shown = protocolNotice;
     if (shown.state === "unpaired") protocolNotice = null;
-    const map: Record<ConnectionState, string> = { live: "live", connecting: "warn", reconnecting: "warn",
-      offline: "bad", error: "bad", unpaired: "", clip: "live", warn: "warn" };
+    const map: Record<ConnectionState, string> = {
+      live: "live",
+      connecting: "warn",
+      reconnecting: "warn",
+      replaying: "warn",
+      stale: "warn",
+      offline: "bad",
+      error: "bad",
+      unpaired: "",
+      clip: "live",
+      warn: "warn",
+    };
     $("dot").className = "dot " + (map[shown.state] || "");
-    $("status").textContent = ({
+    const announcement = {
       live: "Connected",
       connecting: "Connecting\u2026",
       reconnecting: "Connection lost \u2014 retrying in " + (shown.detail || "a moment"),
+      replaying: "Restoring retained scans",
+      stale: "Feed is stale",
       offline: "Can't reach the dashboard" + (shown.detail ? " (" + shown.detail + ")" : ""),
       error: shown.detail || "Error",
       unpaired: shown.detail || "Not paired",
       clip: shown.detail || "Clipboard scan sent",
       warn: shown.detail || "Warning",
-    })[shown.state];
-    $("status").className = shown.state === "live" ? "status-visually-hidden" : "";
+    }[shown.state];
+    currentStatus = shown;
+    paintConnectionStatus();
+    $("liveStatus").textContent = announcement;
     if (shown.state === "unpaired") {
       paired = false;
       showPair(true, false);
@@ -400,7 +688,7 @@ export function startRenderer(
     button.disabled = true;
     button.textContent = "Pairing\u2026";
     $("pairErr").textContent = "";
-    api.pair(server, code).then((result) => {
+    void api.pair(server, code).then((result) => {
       button.disabled = false;
       button.textContent = "Pair";
       if (result.ok) {
@@ -426,21 +714,155 @@ export function startRenderer(
     applyOpacity(((opLevel + 1) % 3) as OpacityLevel);
     void api.setOpacity(opLevel);
   });
-  $("quitBtn").addEventListener("click", () => { void api.quit(); });
-  $("pairCancel").addEventListener("click", () => { if (pairDismissible) closePair(); });
+  $("quitBtn").addEventListener("click", () => {
+    void api.quit();
+  });
+  $("pairCancel").addEventListener("click", () => {
+    if (pairDismissible) closePair();
+  });
   $("detailClose").addEventListener("click", () => closeDetail());
   $("repairBtn").addEventListener("click", () => {
-    api.unpair().then(() => {
+    void api.unpair().then(() => {
       paired = false;
-      showPair(true, false, $("repairBtn"));
+      showPair(true, false, $("settingsBtn"));
     });
   });
-  api.onRepair(() => showPair(true, paired, $("repairBtn")));
+  api.onRepair(() => showPair(true, paired, $("settingsBtn")));
+
+  function numericPreference(input: HTMLInputElement): number | null {
+    if (!input.value.trim()) return null;
+    const value = Number(input.value);
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  }
+
+  function saveFilters(): void {
+    preferences.filters = {
+      query: $("filterQuery").value.trim(),
+      minimumSplitValue: numericPreference($("filterValue")),
+    };
+    const active = !!preferences.filters.query || preferences.filters.minimumSplitValue !== null;
+    $("filterBtn").classList.toggle("armed", active);
+    render();
+    void api.savePreferences(preferences).then((saved) => {
+      preferences = saved;
+    });
+  }
+
+  $("filterBtn").addEventListener("click", () => {
+    const hidden = $("filterPanel").hidden;
+    $("filterPanel").hidden = !hidden;
+    $("filterBtn").setAttribute("aria-pressed", String(hidden));
+    if (hidden) $("filterQuery").focus();
+  });
+  $("filterQuery").addEventListener("input", saveFilters);
+  $("filterValue").addEventListener("input", saveFilters);
+  $("filterClear").addEventListener("click", () => {
+    $("filterQuery").value = "";
+    $("filterValue").value = "";
+    saveFilters();
+    $("filterQuery").focus();
+  });
+
+  function paintMute(): void {
+    const muted = preferences.alerts.muted;
+    $("muteBtn").classList.toggle("armed", muted);
+    $("muteBtn").setAttribute("aria-pressed", String(muted));
+    $("muteBtn").textContent = muted ? "unmute" : "mute";
+    $("muteBtn").setAttribute(
+      "aria-label",
+      muted ? "Unmute desktop alerts" : "Mute desktop alerts",
+    );
+  }
+
+  $("muteBtn").addEventListener("click", () => {
+    preferences.alerts.muted = !preferences.alerts.muted;
+    paintMute();
+    void api.savePreferences(preferences).then((saved) => {
+      preferences = saved;
+      paintMute();
+    });
+  });
+
+  $("settingsBtn").addEventListener("click", openSettings);
+  $("settingsClose").addEventListener("click", () => closeSettings());
+  $("settingsForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const startMinute = inputMinutes($("quietStart").value);
+    const endMinute = inputMinutes($("quietEnd").value);
+    const hulls = preferenceList($("alertHulls").value);
+    const systems = preferenceList($("alertSystems").value);
+    const routes = preferenceList($("alertRoutes").value);
+    const minimumSplitValue = numericPreference($("alertValue"));
+    if (startMinute === null || endMinute === null) {
+      $("settingsErr").textContent = "Enter valid quiet-hour times.";
+      return;
+    }
+    if ($("quietEnabled").checked && startMinute === endMinute) {
+      $("settingsErr").textContent = "Quiet-hour start and end must differ.";
+      return;
+    }
+    if (
+      $("alertsEnabled").checked &&
+      minimumSplitValue === null &&
+      !hulls.length &&
+      !systems.length &&
+      !routes.length
+    ) {
+      $("settingsErr").textContent = "Add at least one alert condition.";
+      return;
+    }
+    if ([hulls, systems, routes].some((list) => list.length > 50)) {
+      $("settingsErr").textContent = "Each alert list is limited to 50 names.";
+      return;
+    }
+    preferences.alerts = {
+      enabled: $("alertsEnabled").checked,
+      muted: preferences.alerts.muted,
+      includeSensitiveDetails: $("sensitiveAlerts").checked,
+      minimumSplitValue,
+      hulls,
+      systems,
+      routes,
+      quietHours: { enabled: $("quietEnabled").checked, startMinute, endMinute },
+    };
+    $("settingsSave").disabled = true;
+    void api.savePreferences(preferences).then((saved) => {
+      preferences = saved;
+      $("settingsSave").disabled = false;
+      paintMute();
+      closeSettings();
+    });
+  });
+
+  $("diagBtn").addEventListener("click", openDiagnostics);
+  $("diagnosticsClose").addEventListener("click", () => closeDiagnostics());
+  $("checkUpdateBtn").addEventListener("click", () => {
+    renderUpdate({ status: "checking", currentVersion: currentUpdate.currentVersion });
+    void api.checkUpdate().then(renderUpdate);
+  });
+  $("openUpdateBtn").addEventListener("click", () => {
+    void api.openUpdate();
+  });
+  api.onUpdate(renderUpdate);
+  api.onNotice((notice) => {
+    visibleNotice = notice.message;
+    paintConnectionStatus();
+    $("liveStatus").textContent = notice.message;
+    if (noticeTimer !== null) runtime.clearTimeout(noticeTimer);
+    noticeTimer = runtime.setTimeout(() => {
+      visibleNotice = null;
+      paintConnectionStatus();
+    }, 8_000);
+  });
 
   function setClipButton(on: boolean): void {
     $("clipBtn").classList.toggle("armed", on);
     $("clipBtn").setAttribute("aria-pressed", String(on));
-    $("clipBtn").setAttribute("aria-label", (on ? "Disable" : "Enable") + " clipboard scan watching");
+    $("clipBtn").textContent = "clipboard: " + (on ? "on" : "off");
+    $("clipBtn").setAttribute(
+      "aria-label",
+      (on ? "Disable" : "Enable") + " clipboard scan watching",
+    );
   }
   $("clipBtn").addEventListener("click", () => {
     void api.clipwatch(!$("clipBtn").classList.contains("armed"));
@@ -456,7 +878,8 @@ export function startRenderer(
       return;
     }
     if (result.sentKind) {
-      const message = result.delivered ? "sent " + result.sentKind + " to the dashboard"
+      const message = result.delivered
+        ? "sent " + result.sentKind + " to the dashboard"
         : "captured a " + result.sentKind + " \u2014 no dashboard tab open";
       setStatus({ state: result.delivered ? "clip" : "warn", detail: message });
       if (clipMsgTimer !== null) runtime.clearTimeout(clipMsgTimer);
@@ -472,7 +895,10 @@ export function startRenderer(
     render();
     if (detailWasOpen) $("list").focus();
   }
-  $("clearBtn").addEventListener("click", clearScans);
+  $("clearBtn").addEventListener("click", () => {
+    clearScans();
+    closeSettings();
+  });
   api.onClear(clearScans);
 
   function paintBumps(): void {
@@ -480,17 +906,23 @@ export function startRenderer(
     Object.keys(bumps).forEach((id) => {
       const bump = bumps[id];
       if (!bump) return;
-      const left = bump.remainingMs - (now - bump.receivedAt);
+      const elapsed = Math.max(0, now - bump.receivedAt);
+      const left = Math.max(0, bump.remainingMs - elapsed);
       const percent = Math.max(0, Math.min(100, (left / bump.totalMs) * 100));
       const seconds = Math.ceil(left / 1000);
-      const label = left <= 0 ? "OUT" : seconds >= 60
-        ? Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0") : seconds + "s";
+      const label =
+        left <= 0
+          ? "OUT"
+          : seconds >= 60
+            ? Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0")
+            : seconds + "s";
       scanElements.get(id)?.forEach((rendered) => {
         rendered.bumpRow.hidden = false;
         rendered.bumpBar.style.width = percent + "%";
         rendered.bumpLeft.textContent = label;
         rendered.bumpWho.textContent = bump.by + (bump.count > 1 ? "  \u00D7" + bump.count : "");
-        rendered.bumpRow.className = "bumprow" + (left <= 0 ? " gone" : left <= 30000 ? " warn" : "");
+        rendered.bumpRow.className =
+          "bumprow" + (left <= 0 ? " gone" : left <= 30000 ? " warn" : "");
         rendered.bumpRow.setAttribute("aria-valuenow", String(Math.round(percent)));
         rendered.bumpRow.setAttribute("aria-valuetext", label + " remaining, bumped by " + bump.by);
       });
@@ -500,7 +932,7 @@ export function startRenderer(
   function sendBump(id: string, button: HTMLButtonElement): void {
     button.disabled = true;
     button.textContent = "\u2026";
-    api.bump(id).then((result) => {
+    void api.bump(id).then((result) => {
       button.disabled = false;
       button.textContent = "BUMP";
       if (result?.ok === false) {
@@ -511,16 +943,31 @@ export function startRenderer(
     });
   }
   api.onBump((bump) => {
-    let remainingMs = Number(bump.remainingMs);
-    if (!Number.isFinite(remainingMs)) remainingMs = Number(bump.holdMs);
-    if (!Number.isFinite(remainingMs)) return;
-    bumps[bump.scanId] = { ...bump, remainingMs: Math.max(0, remainingMs),
-      totalMs: Math.max(1, Number(bump.holdMs) || remainingMs || 1), receivedAt: runtime.monotonicNow() };
+    const holdMs = Number(bump.holdMs);
+    if (!Number.isFinite(holdMs) || holdMs < 0) return;
+    const serverRemainingMs = Number(bump.remainingMs);
+    const eventAt = Number(bump.at);
+    let remainingMs: number;
+    if (Number.isFinite(serverRemainingMs)) {
+      remainingMs = serverRemainingMs;
+    } else if (Number.isFinite(eventAt) && eventAt >= 0) {
+      remainingMs = holdMs - Math.max(0, runtime.dateNow() - eventAt);
+    } else {
+      remainingMs = holdMs;
+    }
+    bumps[bump.scanId] = {
+      ...bump,
+      remainingMs: Math.max(0, Math.min(holdMs, remainingMs)),
+      totalMs: Math.max(1, holdMs),
+      receivedAt: runtime.monotonicNow(),
+    };
     paintBumps();
   });
   api.onBumpCleared((event) => {
     delete bumps[event.scanId];
-    scanElements.get(event.scanId)?.forEach((rendered) => { rendered.bumpRow.hidden = true; });
+    scanElements.get(event.scanId)?.forEach((rendered) => {
+      rendered.bumpRow.hidden = true;
+    });
   });
   api.onScan((scan) => {
     scans.unshift(scan);
@@ -534,12 +981,22 @@ export function startRenderer(
     render();
     showPair(true, false);
   });
-  api.state().then((state) => {
+  void api.state().then((state) => {
     paired = state.paired;
     if (state.serverUrl) $("server").value = state.serverUrl;
     applyOpacity(state.opacity == null ? 1 : state.opacity);
     if (state.paired) closePair(false);
     else showPair(true, false);
+  });
+  void api.preferences().then((saved) => {
+    preferences = saved;
+    $("filterQuery").value = saved.filters.query;
+    $("filterValue").value =
+      saved.filters.minimumSplitValue === null ? "" : String(saved.filters.minimumSplitValue);
+    const active = !!saved.filters.query || saved.filters.minimumSplitValue !== null;
+    $("filterBtn").classList.toggle("armed", active);
+    paintMute();
+    render();
   });
 
   return () => {
@@ -547,5 +1004,6 @@ export function startRenderer(
     intervalIds.forEach((id) => runtime.clearInterval(id));
     if (clipMsgTimer !== null) runtime.clearTimeout(clipMsgTimer);
     if (bumpErrTimer !== null) runtime.clearTimeout(bumpErrTimer);
+    if (noticeTimer !== null) runtime.clearTimeout(noticeTimer);
   };
 }

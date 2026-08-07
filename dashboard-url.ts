@@ -2,11 +2,7 @@ import { isIP } from "node:net";
 import { VALIDATION_LIMITS, boundedString } from "./validation";
 
 export type DashboardOriginErrorCode =
-  | "invalid"
-  | "credentials"
-  | "protocol"
-  | "insecure-remote"
-  | "local-http-disabled";
+  "invalid" | "credentials" | "protocol" | "insecure-remote" | "local-http-disabled";
 
 export type DashboardOriginResult =
   | { ok: true; origin: string; protocol: "https:" | "http:"; loopback: boolean }
@@ -20,13 +16,15 @@ function ipv4Loopback(hostname: string): boolean {
 
 export function isLoopbackHostname(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
-  const unbracketed = normalized.startsWith("[") && normalized.endsWith("]")
-    ? normalized.slice(1, -1)
-    : normalized;
+  const unbracketed =
+    normalized.startsWith("[") && normalized.endsWith("]") ? normalized.slice(1, -1) : normalized;
   return unbracketed === "localhost" || unbracketed === "::1" || ipv4Loopback(unbracketed);
 }
 
-export function parseDashboardOrigin(input: unknown, allowInsecureLocalhost: boolean): DashboardOriginResult {
+export function parseDashboardOrigin(
+  input: unknown,
+  allowInsecureLocalhost: boolean,
+): DashboardOriginResult {
   const raw = boundedString(input, VALIDATION_LIMITS.url, 1);
   if (raw === null) {
     return { ok: false, code: "invalid", error: "Enter a valid dashboard address." };
@@ -40,7 +38,11 @@ export function parseDashboardOrigin(input: unknown, allowInsecureLocalhost: boo
   }
 
   if (url.username || url.password) {
-    return { ok: false, code: "credentials", error: "Dashboard addresses cannot contain credentials." };
+    return {
+      ok: false,
+      code: "credentials",
+      error: "Dashboard addresses cannot contain credentials.",
+    };
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     return { ok: false, code: "protocol", error: "Dashboard addresses must use HTTPS." };

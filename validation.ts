@@ -17,10 +17,8 @@ export type UnknownRecord = Record<string, unknown>;
 export function plainRecord(value: unknown): UnknownRecord | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   try {
-    const prototype = Object.getPrototypeOf(value);
-    return prototype === Object.prototype || prototype === null
-      ? value as UnknownRecord
-      : null;
+    const prototype = Reflect.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null ? (value as UnknownRecord) : null;
   } catch {
     return null;
   }
@@ -31,11 +29,7 @@ export function hasOnlyKeys(source: UnknownRecord, keys: readonly string[]): boo
   return Object.keys(source).every((key) => allowed.has(key));
 }
 
-export function boundedString(
-  value: unknown,
-  maximum: number,
-  minimum = 0,
-): string | null {
+export function boundedString(value: unknown, maximum: number, minimum = 0): string | null {
   if (typeof value !== "string" || value.length < minimum || value.length > maximum) return null;
   if (minimum > 0 && value.trim().length === 0) return null;
   return value;

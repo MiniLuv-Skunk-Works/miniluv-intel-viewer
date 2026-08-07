@@ -16,11 +16,7 @@ export interface CredentialFileSystem {
 }
 
 export type CredentialInitializationStatus =
-  | "ready"
-  | "empty"
-  | "migrated"
-  | "unavailable"
-  | "corrupt";
+  "ready" | "empty" | "migrated" | "unavailable" | "corrupt";
 
 export interface CredentialInitialization {
   status: CredentialInitializationStatus;
@@ -70,7 +66,7 @@ export class CredentialStore {
   }
 
   private async writeEncrypted(token: string): Promise<boolean> {
-    if (!await this.encryptionAvailable()) return false;
+    if (!(await this.encryptionAvailable())) return false;
     try {
       const encrypted = await this.safeStorage.encryptStringAsync(token);
       if (encrypted.length === 0) return false;
@@ -93,9 +89,13 @@ export class CredentialStore {
   async initialize(legacyToken: unknown): Promise<CredentialInitialization> {
     const legacy = this.validToken(legacyToken);
     const removeLegacyToken = legacyToken !== undefined;
-    if (!await this.encryptionAvailable()) {
+    if (!(await this.encryptionAvailable())) {
       this.token = null;
-      try { await this.removeFile(); } catch {}
+      try {
+        await this.removeFile();
+      } catch {
+        // Best effort: unavailable encryption already forces an unpaired state.
+      }
       return { status: "unavailable", removeLegacyToken };
     }
 
@@ -115,15 +115,19 @@ export class CredentialStore {
         const token = this.validToken(decrypted.result);
         if (token === null) throw new Error("invalid credential");
         this.token = token;
-        if (decrypted.shouldReEncrypt && !await this.writeEncrypted(token)) {
+        if (decrypted.shouldReEncrypt && !(await this.writeEncrypted(token))) {
           this.token = null;
           await this.removeFile();
           return { status: "unavailable", removeLegacyToken };
         }
         return { status: "ready", removeLegacyToken };
       } catch {
-        try { await this.removeFile(); } catch {}
-        if (legacy !== null && await this.writeEncrypted(legacy)) {
+        try {
+          await this.removeFile();
+        } catch {
+          // Best effort: corrupt ciphertext is never retained in memory.
+        }
+        if (legacy !== null && (await this.writeEncrypted(legacy))) {
           this.token = legacy;
           return { status: "migrated", removeLegacyToken: true };
         }
@@ -147,7 +151,7 @@ export class CredentialStore {
 
   async set(value: unknown): Promise<boolean> {
     const token = this.validToken(value);
-    if (token === null || !await this.writeEncrypted(token)) return false;
+    if (token === null || !(await this.writeEncrypted(token))) return false;
     this.token = token;
     return true;
   }

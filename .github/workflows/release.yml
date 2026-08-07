@@ -1,25 +1,134 @@
 name: release
+
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: stable-release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release-metadata.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate stable release tag
+        id: release-metadata
+        shell: pwsh
+        run: |
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $expectedTag = "v$packageVersion"
+          if ($env:GITHUB_REF_NAME -cne $expectedTag) {
+            throw "Release tag '$env:GITHUB_REF_NAME' must exactly match package.json version '$expectedTag'."
+          }
+
+          git fetch origin main --no-tags
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Stable release commit $env:GITHUB_SHA is not reachable from origin/main."
+          }
+
+          "version=$packageVersion" >> $env:GITHUB_OUTPUT
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
-      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+      - run: npm run verify
+      - name: Upload test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          files: dist/*.exe
+          name: MILF-Viewer-test-diagnostics-${{ github.sha }}
+          path: output/playwright
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/MILF-Viewer-${{ steps.release-metadata.outputs.version }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+          dependency-snapshot: false
+      - name: Generate executable checksum
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release-metadata.outputs.version }}
+        run: |
+          $executable = "dist/MILF-Viewer-$env:RELEASE_VERSION.exe"
+          if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+            throw "Expected release executable '$executable' was not produced."
+          }
+
+          $hash = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash.ToLowerInvariant()
+          $fileName = Split-Path -Leaf $executable
+          Set-Content -LiteralPath "$executable.sha256" -Value "$hash *$fileName" -Encoding ascii -NoNewline
+      - name: Upload stable release payload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: MILF-Viewer-release-${{ github.sha }}
+          path: |
+            dist/MILF-Viewer-${{ steps.release-metadata.outputs.version }}.exe
+            dist/MILF-Viewer-${{ steps.release-metadata.outputs.version }}.exe.sha256
+            dist/MILF-Viewer-${{ steps.release-metadata.outputs.version }}.spdx.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  attest:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: MILF-Viewer-release-${{ github.sha }}
+          path: dist
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: dist/MILF-Viewer-${{ needs.build.outputs.version }}.exe
+      - name: Attest stable release SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: dist/MILF-Viewer-${{ needs.build.outputs.version }}.exe
+          sbom-path: dist/MILF-Viewer-${{ needs.build.outputs.version }}.spdx.json
+
+  publish:
+    needs: [build, attest]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: MILF-Viewer-release-${{ github.sha }}
+          path: dist
+      - name: Publish stable release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          files: |
+            dist/MILF-Viewer-${{ needs.build.outputs.version }}.exe
+            dist/MILF-Viewer-${{ needs.build.outputs.version }}.exe.sha256
+            dist/MILF-Viewer-${{ needs.build.outputs.version }}.spdx.json
+          fail_on_unmatched_files: true
           generate_release_notes: true
