@@ -13,6 +13,7 @@ import {
   parseScan,
   parseScanRevisionId,
   parseServerError,
+  parseViewerScenarioCalculationResponse,
   parseVocabulary,
   type BumpResult,
   type ClipboardCapture,
@@ -26,6 +27,8 @@ import {
   type PairRequest,
   type PairResult,
   type ProtocolNegotiation,
+  type ScenarioCalculationOutcome,
+  type ViewerScenarioCalculationRequest,
   type ViewerState,
   type UserPreferences,
   type UpdateInfo,
@@ -48,6 +51,7 @@ import type { UpdateChecker } from "./update-checker";
 const SMALL_RESPONSE_LIMIT = 64 * 1024;
 const VOCABULARY_RESPONSE_LIMIT = 16 * 1024 * 1024;
 const VOCABULARY_RESPONSE_TIMEOUT_MS = 60_000;
+const SCENARIO_RESPONSE_LIMIT = 256 * 1024;
 const MAX_SEEN_STABLE_SCAN_IDS = 1_024;
 
 export type ViewerRelay = <K extends keyof IpcEventContract>(
@@ -95,6 +99,7 @@ export class ViewerController {
   private lastEventAt: number | undefined;
   private connectionStatus: ConnectionStatus = { state: "unpaired" };
   private replayTimer: ReturnType<typeof setTimeout> | null = null;
+  private replayLiveStatus: ConnectionStatus = { state: "live" };
   private readonly seenStableScanIds = new Set<string>();
   private readonly seenStableScanIdOrder: string[] = [];
 
@@ -231,6 +236,7 @@ export class ViewerController {
             quietHours: { ...stored.alerts.quietHours },
           },
           filters: { ...stored.filters },
+          combatScenario: { ...stored.combatScenario },
         }
       : defaultUserPreferences();
   }
@@ -239,6 +245,64 @@ export class ViewerController {
     this.settingsStore.scheduleSave({ preferences });
     this.alertService.configure(preferences.alerts);
     return this.preferences();
+  }
+
+  async calculateScenario(
+    request: ViewerScenarioCalculationRequest,
+  ): Promise<ScenarioCalculationOutcome> {
+    const auth = this.session();
+    if (!auth) {
+      return { ok: false, reason: "not-paired", message: "Pair with a dashboard first." };
+    }
+    if (!this.supports(PROTOCOL_CAPABILITIES.scenarioCalculation)) {
+      return {
+        ok: false,
+        reason: "unsupported",
+        message: "This dashboard does not advertise scenario calculations.",
+      };
+    }
+
+    const generation = this.networkGeneration;
+    const result = await this.dashboardClient.requestJson({
+      url: new URL("/api/viewer/scenario-calculations", auth.serverUrl),
+      method: "POST",
+      token: auth.token,
+      body: request,
+      parse: parseViewerScenarioCalculationResponse,
+      maxResponseBytes: SCENARIO_RESPONSE_LIMIT,
+    });
+    if (generation !== this.networkGeneration || (!result.ok && result.kind === "cancelled")) {
+      return {
+        ok: false,
+        reason: "request-failed",
+        message: "The dashboard connection changed before calculations completed.",
+      };
+    }
+    if (!result.ok) {
+      return {
+        ok: false,
+        reason: result.kind === "http" && result.status === 429 ? "rate-limited" : "request-failed",
+        message: this.requestFailureMessage(result),
+      };
+    }
+
+    const response = result.body;
+    const scenarioMatches =
+      response.scenario.state === request.scenario.state &&
+      response.scenario.securityStatus === request.scenario.securityStatus &&
+      response.scenario.tankState === request.scenario.tankState &&
+      response.scenario.implant === request.scenario.implant;
+    const idsMatch =
+      response.results.length === request.scanIds.length &&
+      response.results.every((entry, index) => entry.scanId === request.scanIds[index]);
+    if (!scenarioMatches || !idsMatch) {
+      return {
+        ok: false,
+        reason: "request-failed",
+        message: "Dashboard calculations did not match the request.",
+      };
+    }
+    return { ok: true, response };
   }
 
   diagnostics(): DiagnosticsSnapshot {
@@ -390,8 +454,7 @@ export class ViewerController {
       return;
     }
     if (status.state === "live") {
-      this.emitStatus({ state: "live" });
-      this.scheduleReplaySettled(false);
+      this.emitStatus({ state: "connecting", detail: "Negotiating dashboard protocol" });
       return;
     }
     if (status.state === "stale") {
@@ -416,14 +479,24 @@ export class ViewerController {
     this.replayTimer = null;
   }
 
-  private scheduleReplaySettled(showReplaying: boolean): void {
+  private scheduleReplaySettled(
+    showReplaying: boolean,
+    liveStatus: ConnectionStatus = this.replayLiveStatus,
+  ): void {
     this.clearReplayTimer();
+    this.replayLiveStatus = liveStatus;
     this.alertService.setArmed(false);
-    if (showReplaying) this.emitStatus({ state: "replaying", detail: "Restoring retained scans" });
+    if (showReplaying) {
+      this.emitStatus({
+        ...liveStatus,
+        state: "replaying",
+        detail: "Restoring retained scans",
+      });
+    }
     this.replayTimer = setTimeout(() => {
       this.replayTimer = null;
       this.alertService.setArmed(true);
-      this.emitStatus({ state: "live" });
+      this.emitStatus(this.replayLiveStatus);
     }, 1_000);
   }
 
@@ -602,8 +675,12 @@ export class ViewerController {
         message: "Replay history expired - showing retained scans",
       });
     }
-    this.emitStatus(status);
-    if (hello.replay) this.scheduleReplaySettled(true);
+    if (hello.replay) {
+      this.scheduleReplaySettled(true, status);
+    } else {
+      this.alertService.setArmed(true);
+      this.emitStatus(status);
+    }
     return true;
   }
 

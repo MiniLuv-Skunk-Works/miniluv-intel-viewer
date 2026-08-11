@@ -3,6 +3,7 @@ import {
   PROTOCOL_CAPABILITIES,
   VIEWER_PROTOCOL_MAX_VERSION,
   VIEWER_PROTOCOL_MIN_VERSION,
+  defaultUserPreferences,
   negotiateProtocol,
   parseBumpClearedEvent,
   parseBumpEvent,
@@ -20,6 +21,7 @@ import {
   parseScan,
   parseScanId,
   parseScanRevisionId,
+  parseScenarioCalculationOutcome,
   parseViewerScenarioCalculationRequest,
   parseViewerScenarioCalculationResponse,
   parseSettings,
@@ -27,6 +29,7 @@ import {
   parseViewerState,
   parseViewerReplayMetadata,
   parseVocabulary,
+  parseUserPreferences,
 } from "../src/contracts";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -543,6 +546,20 @@ const scenario = {
 };
 ok("combat scenario parses", parseCombatScenario(scenario)?.tankState === "active");
 ok("invalid implant rejects", parseCombatScenario({ ...scenario, implant: "both" }) === null);
+const legacyPreferences = defaultUserPreferences() as unknown as Record<string, unknown>;
+delete legacyPreferences.combatScenario;
+ok(
+  "older preferences receive the safe universal scenario",
+  parseUserPreferences(legacyPreferences)?.combatScenario.state === "prepped" &&
+    parseUserPreferences(legacyPreferences)?.combatScenario.securityStatus === "0.5",
+);
+ok(
+  "explicit malformed scenarios do not silently reset",
+  parseUserPreferences({
+    ...defaultUserPreferences(),
+    combatScenario: { ...scenario, implant: "both" },
+  }) === null,
+);
 ok(
   "duplicate and oversized batches reject",
   parseViewerScenarioCalculationRequest({ scanIds: ["a", "a"], scenario }) === null &&
@@ -571,6 +588,23 @@ ok(
       },
     ],
   }) === null,
+);
+ok(
+  "calculation IPC outcomes validate strictly",
+  parseScenarioCalculationOutcome({
+    ok: true,
+    response: fixtureScenarioResponse,
+  })?.ok === true &&
+    parseScenarioCalculationOutcome({
+      ok: false,
+      reason: "rate-limited",
+      message: "slow down",
+    })?.ok === false &&
+    parseScenarioCalculationOutcome({
+      ok: false,
+      reason: "secret",
+      message: "bad",
+    }) === null,
 );
 
 console.log("\n=== vocabulary, clipboard, and status boundaries ===");

@@ -49,11 +49,18 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
         .locator("#appHeader")
         .evaluate((header) => header.scrollWidth <= header.clientWidth),
     ).toBe(true);
-
+    expect(
+      await page
+        .locator("#scenarioControls")
+        .evaluate((controls) => controls.scrollWidth <= controls.clientWidth),
+    ).toBe(true);
     await page.locator("#server").fill(dashboard.url);
     await page.locator("#code").fill("ABCD-EFGH");
     await page.locator("#pairBtn").click();
     await expect(page.locator("#pair")).not.toHaveClass(/show/);
+    await expect(page.locator("#scenarioControls")).toHaveAccessibleName(
+      "Tank and fleet calculations for every scan",
+    );
     await dashboard.waitForFeedCount(1);
     dashboard.sendHello();
     await expect(page.locator("#dot")).toHaveClass(/live/);
@@ -68,7 +75,24 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
       pilot: "<script>bad()</script>",
       fitEft: hostile,
     });
+    await waitForRequest(dashboard, "/api/viewer/scenario-calculations");
     await expect(page.locator(".hull").first()).toHaveText(hostile);
+    await expect(page.locator(".scan").first()).toContainText("600k EHP vs Void");
+    await expect(page.locator(".scan").first()).toContainText("12 Talos");
+    const calculationRequestsBeforeToggle = dashboard.requests.filter(
+      (request) => request.path === "/api/viewer/scenario-calculations",
+    ).length;
+    await page.locator("#scenarioTank").selectOption("overheated");
+    await waitForRequestCount(
+      dashboard,
+      "/api/viewer/scenario-calculations",
+      calculationRequestsBeforeToggle + 1,
+    );
+    await expect(page.locator(".scan").first()).toContainText("900k EHP vs Void");
+    await page.locator(".scanOpen").first().click();
+    await expect(page.locator("#detailBody")).toContainText("900,000 EHP");
+    await expect(page.locator("#detailBody")).toContainText("Overheated tank");
+    await page.locator("#detailClose").click();
     await expect(page.locator("img[src='x']")).toHaveCount(0);
     expect(await page.evaluate(() => document.body.dataset.pwned)).toBeUndefined();
     const statusTooltip = page.locator("#status");
@@ -103,6 +127,9 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     await expect(page.locator("#diagBtn")).toBeFocused();
     await page.locator("#settingsClose").click();
 
+    const calculationsBeforeReconnect = dashboard.requests.filter(
+      (request) => request.path === "/api/viewer/scenario-calculations",
+    ).length;
     dashboard.disconnectFeeds();
     await dashboard.waitForFeedCount(1);
     const feeds = dashboard.requests.filter((request) => request.path === "/api/feed");
@@ -110,6 +137,11 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     dashboard.sendHello();
     dashboard.sendScan({ id: `scan-${hostile}`, at: Date.now(), hull: "duplicate" });
     dashboard.sendScan({ id: "scan-after-reconnect", at: Date.now(), hull: "Providence" });
+    await waitForRequestCount(
+      dashboard,
+      "/api/viewer/scenario-calculations",
+      calculationsBeforeReconnect + 1,
+    );
     await expect(page.locator(".hull", { hasText: "Providence" })).toHaveCount(1);
     await expect(page.locator(".hull", { hasText: "duplicate" })).toHaveCount(0);
 
@@ -153,6 +185,7 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     expect(restoredBounds).toEqual(savedBounds);
     await expect(page.locator("#pair")).not.toHaveClass(/show/);
     await expect(page.locator("#muteBtn")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("#scenarioTank")).toHaveValue("overheated");
     await page.locator("#settingsBtn").click();
     await page.locator("#repairBtn").click();
     await expect(page.locator("#pair")).toHaveClass(/show/);
@@ -224,6 +257,21 @@ async function waitForRequest(
   const deadline = Date.now() + timeoutMs;
   while (!dashboard.requests.some((request) => request.path === requestPath)) {
     if (Date.now() >= deadline) throw new Error(`request ${requestPath} was not observed`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+async function waitForRequestCount(
+  dashboard: MockDashboard,
+  requestPath: string,
+  count: number,
+  timeoutMs = 5_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (dashboard.requests.filter((request) => request.path === requestPath).length < count) {
+    if (Date.now() >= deadline) {
+      throw new Error("request " + requestPath + " did not reach count " + count);
+    }
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }

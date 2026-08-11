@@ -36,6 +36,7 @@ export interface FilterPreferences {
 export interface UserPreferences {
   alerts: AlertPreferences;
   filters: FilterPreferences;
+  combatScenario: CombatScenario;
 }
 
 export const DEFAULT_USER_PREFERENCES: Readonly<UserPreferences> = Object.freeze({
@@ -50,6 +51,12 @@ export const DEFAULT_USER_PREFERENCES: Readonly<UserPreferences> = Object.freeze
     quietHours: Object.freeze({ enabled: false, startMinute: 22 * 60, endMinute: 7 * 60 }),
   }),
   filters: Object.freeze({ query: "", minimumSplitValue: null }),
+  combatScenario: Object.freeze({
+    state: "prepped",
+    securityStatus: "0.5",
+    tankState: "active",
+    implant: "none",
+  }),
 });
 
 export function defaultUserPreferences(): UserPreferences {
@@ -62,6 +69,7 @@ export function defaultUserPreferences(): UserPreferences {
       quietHours: { ...DEFAULT_USER_PREFERENCES.alerts.quietHours },
     },
     filters: { ...DEFAULT_USER_PREFERENCES.filters },
+    combatScenario: { ...DEFAULT_USER_PREFERENCES.combatScenario },
   };
 }
 
@@ -230,6 +238,13 @@ export interface ViewerScenarioCalculationResponse {
   results: ViewerScenarioCalculationResult[];
 }
 
+export type ScenarioCalculationFailureReason =
+  "not-paired" | "unsupported" | "rate-limited" | "request-failed";
+
+export type ScenarioCalculationOutcome =
+  | { ok: true; response: ViewerScenarioCalculationResponse }
+  | { ok: false; reason: ScenarioCalculationFailureReason; message: string };
+
 export interface CargoEntry {
   name: string;
   qty: number;
@@ -352,6 +367,10 @@ export interface IpcInvokeContract {
   clipwatch: { request: boolean | undefined; result: ClipboardResult };
   preferences: { request: undefined; result: UserPreferences };
   savePreferences: { request: UserPreferences; result: UserPreferences };
+  scenarioCalculation: {
+    request: ViewerScenarioCalculationRequest;
+    result: ScenarioCalculationOutcome;
+  };
   diagnostics: { request: undefined; result: DiagnosticsSnapshot };
   checkUpdate: { request: undefined; result: UpdateInfo };
   openUpdate: { request: undefined; result: boolean };
@@ -380,6 +399,7 @@ export interface ViewerApi {
   clipwatch(on?: boolean): Promise<ClipboardResult>;
   preferences(): Promise<UserPreferences>;
   savePreferences(preferences: UserPreferences): Promise<UserPreferences>;
+  calculateScenario(request: ViewerScenarioCalculationRequest): Promise<ScenarioCalculationOutcome>;
   diagnostics(): Promise<DiagnosticsSnapshot>;
   checkUpdate(): Promise<UpdateInfo>;
   openUpdate(): Promise<boolean>;
@@ -496,7 +516,7 @@ function parseNullableSplitValue(value: unknown): number | null | undefined {
 
 export function parseUserPreferences(value: unknown): UserPreferences | null {
   const source = plainRecord(value);
-  if (!source || !hasOnlyKeys(source, ["alerts", "filters"])) return null;
+  if (!source || !hasOnlyKeys(source, ["alerts", "filters", "combatScenario"])) return null;
   const alerts = plainRecord(source.alerts);
   const filters = plainRecord(source.filters);
   if (
@@ -526,6 +546,10 @@ export function parseUserPreferences(value: unknown): UserPreferences | null {
   const routes = parsePreferenceList(alerts.routes);
   const quiet = plainRecord(alerts.quietHours);
   const query = boundedString(filters.query, 256);
+  const combatScenario =
+    source.combatScenario === undefined
+      ? { ...DEFAULT_USER_PREFERENCES.combatScenario }
+      : parseCombatScenario(source.combatScenario);
   if (
     minimumSplitValue === undefined ||
     filterMinimumSplitValue === undefined ||
@@ -533,6 +557,7 @@ export function parseUserPreferences(value: unknown): UserPreferences | null {
     !systems ||
     !routes ||
     query === null ||
+    !combatScenario ||
     !quiet ||
     !hasOnlyKeys(quiet, ["enabled", "startMinute", "endMinute"]) ||
     typeof quiet.enabled !== "boolean"
@@ -563,6 +588,7 @@ export function parseUserPreferences(value: unknown): UserPreferences | null {
       quietHours: { enabled: quiet.enabled, startMinute, endMinute },
     },
     filters: { query: query.trim(), minimumSplitValue: filterMinimumSplitValue },
+    combatScenario,
   };
 }
 
@@ -887,6 +913,28 @@ export function parseViewerScenarioCalculationResponse(
     results.push({ scanId, status: "ready", tank, requirements });
   }
   return { scenario, results };
+}
+
+export function parseScenarioCalculationOutcome(value: unknown): ScenarioCalculationOutcome | null {
+  const source = plainRecord(value);
+  if (!source || typeof source.ok !== "boolean") return null;
+  if (source.ok) {
+    if (!hasOnlyKeys(source, ["ok", "response"])) return null;
+    const response = parseViewerScenarioCalculationResponse(source.response);
+    return response ? { ok: true, response } : null;
+  }
+  if (!hasOnlyKeys(source, ["ok", "reason", "message"])) return null;
+  const reasons: readonly ScenarioCalculationFailureReason[] = [
+    "not-paired",
+    "unsupported",
+    "rate-limited",
+    "request-failed",
+  ];
+  const reason = reasons.includes(source.reason as ScenarioCalculationFailureReason)
+    ? (source.reason as ScenarioCalculationFailureReason)
+    : null;
+  const message = boundedString(source.message, VALIDATION_LIMITS.label, 1);
+  return reason && message ? { ok: false, reason, message } : null;
 }
 
 export function parseBumpEvent(value: unknown): BumpEvent | null {

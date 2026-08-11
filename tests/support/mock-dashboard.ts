@@ -157,6 +157,47 @@ export class MockDashboard {
       this.json(response, 200, { scanId, by: "tester", count: 1, holdMs: 180_000 });
       return;
     }
+    if (path === "/api/viewer/scenario-calculations" && request.method === "POST") {
+      const payload = body as {
+        scanIds?: unknown;
+        scenario?: {
+          state?: string;
+          securityStatus?: string;
+          tankState?: string;
+          implant?: string;
+        };
+      };
+      const scanIds = Array.isArray(payload.scanIds)
+        ? payload.scanIds.filter((value): value is string => typeof value === "string")
+        : [];
+      const scenario = payload.scenario ?? {};
+      const selectedEhp =
+        scenario.tankState === "overheated"
+          ? 900_000
+          : scenario.tankState === "passive"
+            ? 450_000
+            : 600_000;
+      this.json(response, 200, {
+        scenario,
+        results: scanIds.map((scanId) => ({
+          scanId,
+          status: "ready",
+          tank: {
+            selectedProfile: "Void (kin/therm)",
+            selectedEhp,
+            ehpByProfile: { "Void (kin/therm)": selectedEhp },
+            overridden: false,
+          },
+          requirements: [
+            {
+              name: "Talos",
+              ships: scenario.state === "unprepped" ? 18 : 12,
+            },
+          ],
+        })),
+      });
+      return;
+    }
     if (path === "/api/feed" && request.method === "GET") {
       response.writeHead(200, {
         "content-type": "text/event-stream",

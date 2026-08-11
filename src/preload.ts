@@ -12,6 +12,8 @@ import {
   parseOpacity,
   parsePairResult,
   parseScan,
+  parseScenarioCalculationOutcome,
+  parseViewerScenarioCalculationRequest,
   parseViewerState,
   parseUpdateInfo,
   parseUserNotice,
@@ -69,6 +71,19 @@ const api: ViewerApi = {
   savePreferences: async (preferences) =>
     parseUserPreferences(await invokeUnknown("savePreferences", preferences)) ??
     defaultUserPreferences(),
+  calculateScenario: async (request) => {
+    const validated = parseViewerScenarioCalculationRequest(request);
+    if (!validated) {
+      return { ok: false, reason: "request-failed", message: "Invalid calculation request." };
+    }
+    return (
+      parseScenarioCalculationOutcome(await invokeUnknown("scenarioCalculation", validated)) ?? {
+        ok: false,
+        reason: "request-failed",
+        message: "Invalid calculation response.",
+      }
+    );
+  },
   diagnostics: async () =>
     parseDiagnosticsSnapshot(await invokeUnknown("diagnostics", undefined)) ?? {
       appVersion: "unknown",

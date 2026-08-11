@@ -44,6 +44,7 @@ describe("main-process authority", () => {
       "clipwatch",
       "preferences",
       "savePreferences",
+      "scenarioCalculation",
       "diagnostics",
       "checkUpdate",
       "openUpdate",

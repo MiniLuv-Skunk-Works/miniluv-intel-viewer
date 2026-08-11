@@ -5,6 +5,7 @@ import {
   parseOpacity,
   parsePairRequest,
   parseScanId,
+  parseViewerScenarioCalculationRequest,
   parseUserPreferences,
   defaultUserPreferences,
   type BumpResult,
@@ -13,6 +14,8 @@ import {
   type OpacityLevel,
   type PairRequest,
   type PairResult,
+  type ScenarioCalculationOutcome,
+  type ViewerScenarioCalculationRequest,
   type ViewerState,
   type DiagnosticsSnapshot,
   type UpdateInfo,
@@ -29,6 +32,7 @@ export interface ViewerActions {
   clipboard(on: boolean | undefined): ClipboardResult;
   preferences(): UserPreferences;
   savePreferences(preferences: UserPreferences): UserPreferences;
+  calculateScenario(request: ViewerScenarioCalculationRequest): Promise<ScenarioCalculationOutcome>;
   diagnostics(): DiagnosticsSnapshot;
   checkUpdate(): Promise<UpdateInfo>;
   openUpdate(): Promise<boolean>;
@@ -134,6 +138,17 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => 
       return preferences
         ? options.actions.savePreferences(preferences)
         : options.actions.preferences();
+    },
+  );
+
+  handle(
+    "scenarioCalculation",
+    () => ({ ok: false, reason: "request-failed", message: "Request rejected." }),
+    (_event, input) => {
+      const request = parseViewerScenarioCalculationRequest(input);
+      return request
+        ? options.actions.calculateScenario(request)
+        : { ok: false, reason: "request-failed", message: "Invalid calculation request." };
     },
   );
 

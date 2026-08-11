@@ -98,8 +98,12 @@ choices, EHP, DPS, fleet requirements, or the dashboard's private tank context.
 The scenario-calculation contract accepts 1 to 25 unique scan IDs and a complete
 `{ state, securityStatus, tankState, implant }` scenario. Its response preserves
 request order and classifies each ID as `ready`, `unavailable`, or `not-found`.
-Until the universal controls and calculation client land, the renderer displays
-facts-only cards and details.
+The renderer persists one local combat scenario, keeps calculation results in a
+map separate from scan facts, and renders cards and details from that map. It
+batches the retained replay after replay settles, refreshes one stable scan ID
+for a live publication or revision, and refreshes all retained IDs when a
+scenario control changes. Scenario generations and per-scan request epochs
+prevent older responses from replacing newer selections or revisions.
 
 Bump events carry the authoritative server epoch `at`, total `holdMs`, and the
 server-calculated `remainingMs`. The viewer prefers `remainingMs` so wall-clock

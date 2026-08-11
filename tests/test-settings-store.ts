@@ -6,7 +6,12 @@ import {
   type TimerApi,
   type TimerHandle,
 } from "../src/settings-store";
-import { parseSettingsDocument, parseVocabulary, type Settings } from "../src/contracts";
+import {
+  defaultUserPreferences,
+  parseSettingsDocument,
+  parseVocabulary,
+  type Settings,
+} from "../src/contracts";
 import { test } from "node:test";
 import { ok } from "./support/assertions";
 
@@ -160,6 +165,44 @@ async function run(): Promise<void> {
   ok(
     "flush persists a pending debounce immediately",
     JSON.parse(fs.files.get(file)!).watchClipboard === true && timers.active() === 0,
+  );
+
+  console.log("\n=== combat scenario settings migration ===");
+  const legacyPreferences = defaultUserPreferences() as unknown as Record<string, unknown>;
+  delete legacyPreferences.combatScenario;
+  const migrationFs = new MemoryFileSystem();
+  migrationFs.files.set(file, JSON.stringify({ preferences: legacyPreferences }));
+  const migrated = new SettingsStore(file, parseSettingsDocument, {
+    ...quiet,
+    fileSystem: migrationFs,
+    timers: new FakeTimers(),
+  });
+  await migrated.initialize();
+  ok(
+    "older preferences gain defaults without corrupt-file handling",
+    migrated.get().preferences?.combatScenario.state === "prepped" &&
+      ![...migrationFs.files.keys()].some((name) => name.includes(".corrupt-")),
+  );
+  await migrated.saveNow({
+    preferences: {
+      ...migrated.get().preferences!,
+      combatScenario: {
+        state: "unprepped",
+        securityStatus: "0.9",
+        tankState: "overheated",
+        implant: "nirvana",
+      },
+    },
+  });
+  const restarted = new SettingsStore(file, parseSettingsDocument, {
+    ...quiet,
+    fileSystem: migrationFs,
+  });
+  await restarted.initialize();
+  ok(
+    "combat scenario persists across settings-store restarts",
+    restarted.get().preferences?.combatScenario.tankState === "overheated" &&
+      restarted.get().preferences?.combatScenario.implant === "nirvana",
   );
 
   console.log("\n=== corrupt and interrupted files ===");

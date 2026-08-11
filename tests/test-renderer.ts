@@ -16,6 +16,8 @@ import type {
   DiagnosticsSnapshot,
   UpdateInfo,
   UserNotice,
+  ViewerScenarioCalculationRequest,
+  ScenarioCalculationOutcome,
 } from "../src/contracts";
 import { defaultUserPreferences } from "../src/contracts";
 import { startRenderer, type RendererRuntime } from "../src/renderer/controller";
@@ -36,6 +38,10 @@ class FakeApi implements ViewerApi {
   bumpCalls: string[] = [];
   pairCalls: Array<[string, string]> = [];
   opacityCalls: number[] = [];
+  calculationCalls: ViewerScenarioCalculationRequest[] = [];
+  calculationHandler:
+    ((request: ViewerScenarioCalculationRequest) => Promise<ScenarioCalculationOutcome>) | null =
+    null;
   private scanListener: (scan: Scan) => void = () => undefined;
   private statusListener: (status: ConnectionStatus) => void = () => undefined;
   private clearListener: () => void = () => undefined;
@@ -75,6 +81,31 @@ class FakeApi implements ViewerApi {
   savePreferences(preferences: UserPreferences): Promise<UserPreferences> {
     this.preferenceValue = preferences;
     return Promise.resolve(preferences);
+  }
+  calculateScenario(
+    request: ViewerScenarioCalculationRequest,
+  ): Promise<ScenarioCalculationOutcome> {
+    this.calculationCalls.push(request);
+    if (this.calculationHandler) return this.calculationHandler(request);
+    return Promise.resolve({
+      ok: true,
+      response: {
+        scenario: request.scenario,
+        results: request.scanIds.map((scanId) => ({
+          scanId,
+          status: "ready" as const,
+          tank: {
+            selectedProfile: "Void (kin/therm)",
+            selectedEhp: request.scenario.tankState === "overheated" ? 900_000 : 600_000,
+            ehpByProfile: { "Void (kin/therm)": 600_000 },
+            overridden: false,
+          },
+          requirements: [
+            { name: "Talos" as const, ships: request.scenario.state === "prepped" ? 12 : 18 },
+          ],
+        })),
+      },
+    });
   }
   diagnostics(): Promise<DiagnosticsSnapshot> {
     return Promise.resolve({
@@ -203,6 +234,28 @@ function key(target: EventTarget, value: string, shiftKey = false): void {
 function scan(id: string, hull: string): Scan {
   return { id, at: runtime.wallNow - 2000, hull, pilot: "Pilot", scout: "Scout", system: "Uedama" };
 }
+function calculationOutcome(
+  request: ViewerScenarioCalculationRequest,
+  selectedEhp: number,
+): ScenarioCalculationOutcome {
+  return {
+    ok: true,
+    response: {
+      scenario: request.scenario,
+      results: request.scanIds.map((scanId) => ({
+        scanId,
+        status: "ready",
+        tank: {
+          selectedProfile: "Void (kin/therm)",
+          selectedEhp,
+          ehpByProfile: { "Void (kin/therm)": selectedEhp },
+          overridden: false,
+        },
+        requirements: [{ name: "Talos", ships: request.scenario.state === "prepped" ? 12 : 18 }],
+      })),
+    },
+  };
+}
 function articleFor(hull: string): HTMLElement | null {
   return (
     Array.from(document.querySelectorAll<HTMLElement>(".scan")).find(
@@ -216,6 +269,86 @@ function bumpLabel(hull: string): string | null | undefined {
 
 async function run(): Promise<void> {
   await flush();
+  console.log("\n=== universal scenario replay and request generations ===");
+  api.emitStatus({ state: "replaying", protocolVersion: 2 });
+  api.emitScan(scan("scenario-a", "Scenario Hull A"));
+  api.emitScan(scan("scenario-b", "Scenario Hull B"));
+  ok("replayed scans do not request individually", api.calculationCalls.length === 0);
+  api.emitStatus({ state: "live", protocolVersion: 2 });
+  await flush();
+  ok(
+    "replay completion makes one batch for every retained scan",
+    api.calculationCalls.length === 1 &&
+      api.calculationCalls[0]?.scanIds.join(",") === "scenario-b,scenario-a",
+    api.calculationCalls,
+  );
+  ok(
+    "cards render server-calculated EHP, profile, fleet, and universal context",
+    articleFor("Scenario Hull A")?.textContent?.includes("600k EHP vs Void") &&
+      articleFor("Scenario Hull A")?.textContent?.includes("12 Talos") &&
+      articleFor("Scenario Hull A")?.textContent?.includes("Active tank") &&
+      articleFor("Scenario Hull A")?.textContent?.includes("Prepped"),
+  );
+  api.emitScan({ ...scan("scenario-a", "Scenario Hull A"), notes: "revised" });
+  await flush();
+  ok(
+    "a live scan revision requests only its stable scan ID",
+    api.calculationCalls.length === 2 &&
+      api.calculationCalls[1]?.scanIds.join(",") === "scenario-a",
+  );
+  articleFor("Scenario Hull A")?.querySelector<HTMLElement>(".scanOpen")?.click();
+  const tankSelect = document.getElementById("scenarioTank") as HTMLSelectElement;
+  tankSelect.value = "overheated";
+  tankSelect.dispatchEvent(new window.Event("change", { bubbles: true }) as unknown as Event);
+  await flush();
+  ok(
+    "tank changes make one full batch and refresh the open detail",
+    api.calculationCalls.length === 3 &&
+      api.calculationCalls[2]?.scanIds.length === 2 &&
+      document.getElementById("detailBody")?.textContent?.includes("900,000 EHP") &&
+      document.getElementById("detailBody")?.textContent?.includes("Overheated tank"),
+  );
+  const callsBeforeOtherControls = api.calculationCalls.length;
+  const securitySelect = document.getElementById("scenarioSecurity") as HTMLSelectElement;
+  securitySelect.value = "0.9";
+  securitySelect.dispatchEvent(new window.Event("change", { bubbles: true }) as unknown as Event);
+  await flush();
+  const implantSelect = document.getElementById("scenarioImplant") as HTMLSelectElement;
+  implantSelect.value = "nirvana";
+  implantSelect.dispatchEvent(new window.Event("change", { bubbles: true }) as unknown as Event);
+  await flush();
+  (document.getElementById("scenarioUnprepped") as HTMLInputElement).click();
+  await flush();
+  ok(
+    "security, implant, and fleet-state controls each make one complete batch",
+    api.calculationCalls.length === callsBeforeOtherControls + 3 &&
+      api.calculationCalls.slice(-3).every((request) => request.scanIds.length === 2),
+  );
+
+  const deferred: Array<{
+    request: ViewerScenarioCalculationRequest;
+    resolve: (outcome: ScenarioCalculationOutcome) => void;
+  }> = [];
+  api.calculationHandler = (request) =>
+    new Promise((resolve) => deferred.push({ request, resolve }));
+  tankSelect.value = "passive";
+  tankSelect.dispatchEvent(new window.Event("change", { bubbles: true }) as unknown as Event);
+  tankSelect.value = "active";
+  tankSelect.dispatchEvent(new window.Event("change", { bubbles: true }) as unknown as Event);
+  const older = deferred[0];
+  const newer = deferred[1];
+  if (newer) newer.resolve(calculationOutcome(newer.request, 700_000));
+  await flush();
+  if (older) older.resolve(calculationOutcome(older.request, 300_000));
+  await flush();
+  ok(
+    "an older scenario response cannot overwrite the current selection",
+    articleFor("Scenario Hull A")?.textContent?.includes("700k EHP") &&
+      !articleFor("Scenario Hull A")?.textContent?.includes("300k EHP"),
+  );
+  api.calculationHandler = null;
+  api.emitClear();
+
   console.log("\n=== selector-safe IDs and exact bump ownership ===");
   const hostileIds = [
     `quote"'bracket[]`,
@@ -224,6 +357,7 @@ async function run(): Promise<void> {
     `#scan > .other:not([safe])`,
   ];
   hostileIds.forEach((id, index) => api.emitScan(scan(id, "Hull " + index)));
+  await flush();
   ok("every hostile ID renders", document.querySelectorAll(".scan").length === hostileIds.length);
   const targetId = hostileIds[3] ?? "";
   const target = articleFor("Hull 3");
@@ -523,6 +657,19 @@ async function run(): Promise<void> {
       "repairBtn",
       "quitBtn",
     ].every((id) => document.getElementById(id)?.tagName === "BUTTON"),
+  );
+  ok(
+    "universal scenario controls are labelled native controls",
+    document
+      .getElementById("scenarioControls")
+      ?.querySelector("legend")
+      ?.textContent?.includes("every scan") &&
+      ["scenarioPrepped", "scenarioUnprepped"].every(
+        (id) => (document.getElementById(id) as HTMLInputElement)?.type === "radio",
+      ) &&
+      ["scenarioSecurity", "scenarioTank", "scenarioImplant"].every(
+        (id) => document.getElementById(id)?.tagName === "SELECT",
+      ),
   );
   ok(
     "secondary viewer controls live in settings instead of the compact header",
