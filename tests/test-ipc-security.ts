@@ -1,4 +1,4 @@
-import { isTrustedIpcSource, runAuthorizedIpc } from "../ipc-security";
+import { isTrustedIpcSource, runAuthorizedIpc } from "../src/ipc-security";
 import { test } from "node:test";
 import { ok } from "./support/assertions";
 

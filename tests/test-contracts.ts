@@ -24,7 +24,7 @@ import {
   parseViewerState,
   parseViewerReplayMetadata,
   parseVocabulary,
-} from "../contracts";
+} from "../src/contracts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { ok } from "./support/assertions";

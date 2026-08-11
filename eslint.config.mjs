@@ -29,15 +29,15 @@ export default tseslint.config(
     },
   },
   {
-    files: ["*.ts", "tests/**/*.ts"],
+    files: ["*.ts", "src/**/*.ts", "tests/**/*.ts"],
     languageOptions: { globals: globals.node },
   },
   {
-    files: ["main.ts", "preload.ts", "window-manager.ts"],
+    files: ["src/main.ts", "src/preload.ts", "src/window-manager.ts"],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
   {
-    files: ["renderer/**/*.ts"],
+    files: ["src/renderer/**/*.ts"],
     languageOptions: { globals: globals.browser },
   },
   {

@@ -8,8 +8,8 @@ const source = (file: string): string => fs.readFileSync(path.join(root, file), 
 
 describe("renderer containment policy", () => {
   it("uses text-only rendering and a deny-by-default CSP", () => {
-    const renderer = source("renderer/controller.ts");
-    const html = source("renderer/index.html");
+    const renderer = source("src/renderer/controller.ts");
+    const html = source("src/renderer/index.html");
     assert.doesNotMatch(renderer, /innerHTML|outerHTML|insertAdjacentHTML/);
     assert.match(renderer, /textContent/);
     assert.match(renderer, /replaceChildren/);
@@ -19,7 +19,7 @@ describe("renderer containment policy", () => {
   });
 
   it("keeps hardened BrowserWindow preferences and native escape blocking", () => {
-    const windows = source("window-manager.ts");
+    const windows = source("src/window-manager.ts");
     assert.match(windows, /contextIsolation: true/);
     assert.match(windows, /nodeIntegration: false/);
     assert.match(windows, /sandbox: true/);
@@ -32,7 +32,7 @@ describe("renderer containment policy", () => {
 
 describe("main-process authority", () => {
   it("authorizes every IPC call against the current viewer main frame", () => {
-    const handlers = source("ipc-handlers.ts");
+    const handlers = source("src/ipc-handlers.ts");
     assert.match(handlers, /runAuthorizedIpc/);
     assert.match(handlers, /getWebContents/);
     for (const channel of [
@@ -54,7 +54,7 @@ describe("main-process authority", () => {
   });
 
   it("never exposes credentials through the preload API", () => {
-    const preload = source("preload.ts");
+    const preload = source("src/preload.ts");
     assert.doesNotMatch(preload, /safeStorage|credential\.bin|token:/);
     assert.match(preload, /contextBridge\.exposeInMainWorld\("milf", api\)/);
   });

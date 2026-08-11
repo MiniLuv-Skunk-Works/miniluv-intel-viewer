@@ -4,7 +4,7 @@
 // a breach. The rejection cases matter more than the acceptance ones.
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { classify as classifyRaw, isSlotHeader } from "../clipboard-filter";
+import { classify as classifyRaw, isSlotHeader } from "../src/clipboard-filter";
 import { ok } from "./support/assertions";
 
 // A slice of EVE's real vocabulary. The live one comes from the SDE.

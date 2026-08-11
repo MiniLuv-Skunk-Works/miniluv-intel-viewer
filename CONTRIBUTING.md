@@ -16,7 +16,7 @@ npm ci
 npm start
 ```
 
-See [BUILD.md](BUILD.md) for loopback development, packaging, automated tests,
+See [BUILD.md](docs/BUILD.md) for loopback development, packaging, automated tests,
 and the manual Windows smoke-test procedure.
 
 ## Propose a change

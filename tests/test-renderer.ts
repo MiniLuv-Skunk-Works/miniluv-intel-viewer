@@ -16,14 +16,14 @@ import type {
   DiagnosticsSnapshot,
   UpdateInfo,
   UserNotice,
-} from "../contracts";
-import { defaultUserPreferences } from "../contracts";
-import { startRenderer, type RendererRuntime } from "../renderer/controller";
+} from "../src/contracts";
+import { defaultUserPreferences } from "../src/contracts";
+import { startRenderer, type RendererRuntime } from "../src/renderer/controller";
 import { ok } from "./support/assertions";
 
 const ROOT = path.resolve(__dirname, "..", "..");
-const html = fs.readFileSync(path.join(ROOT, "renderer", "index.html"), "utf8");
-const source = fs.readFileSync(path.join(ROOT, "renderer", "controller.ts"), "utf8");
+const html = fs.readFileSync(path.join(ROOT, "src", "renderer", "index.html"), "utf8");
+const source = fs.readFileSync(path.join(ROOT, "src", "renderer", "controller.ts"), "utf8");
 
 const emptyClipboard = (): ClipboardResult => ({
   on: false,

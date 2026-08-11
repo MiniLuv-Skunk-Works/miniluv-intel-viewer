@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { AlertService } from "../alerting";
+import type { AlertService } from "../src/alerting";
 import {
   PROTOCOL_CAPABILITIES,
   type IpcEventContract,
   type Scan,
   type Vocabulary,
-} from "../contracts";
-import type { CredentialStore } from "../credentials";
-import type { DiagnosticsRecorder } from "../diagnostics";
-import type { FeedConnectionCallbacks } from "../feed-connection";
-import type { AtomicJsonFile, SettingsStore } from "../settings-store";
-import type { UpdateChecker } from "../update-checker";
-import { ViewerController, type FeedConnectionLike } from "../viewer-controller";
-import type { ClipboardWatcher } from "../clipboard-watcher";
+} from "../src/contracts";
+import type { CredentialStore } from "../src/credentials";
+import type { DiagnosticsRecorder } from "../src/diagnostics";
+import type { FeedConnectionCallbacks } from "../src/feed-connection";
+import type { AtomicJsonFile, SettingsStore } from "../src/settings-store";
+import type { UpdateChecker } from "../src/update-checker";
+import { ViewerController, type FeedConnectionLike } from "../src/viewer-controller";
+import type { ClipboardWatcher } from "../src/clipboard-watcher";
 
 describe("viewer scan revisions", () => {
   it("accepts independent revision IDs and alerts only for the first stable scan", async () => {

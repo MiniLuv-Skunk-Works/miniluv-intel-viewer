@@ -5,8 +5,8 @@ import {
   type AtomicFileSystem,
   type TimerApi,
   type TimerHandle,
-} from "../settings-store";
-import { parseSettingsDocument, parseVocabulary, type Settings } from "../contracts";
+} from "../src/settings-store";
+import { parseSettingsDocument, parseVocabulary, type Settings } from "../src/contracts";
 import { test } from "node:test";
 import { ok } from "./support/assertions";
 

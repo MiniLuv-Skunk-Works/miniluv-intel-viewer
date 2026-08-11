@@ -1,4 +1,4 @@
-import type { Settings, WindowPlacement } from "../contracts";
+import type { Settings, WindowPlacement } from "../src/contracts";
 import {
   captureWindowPlacement,
   defaultWindowBounds,
@@ -6,7 +6,7 @@ import {
   resetWindowBounds,
   restoreWindowBounds,
   type DisplayGeometry,
-} from "../window-placement";
+} from "../src/window-placement";
 import { ok } from "./support/assertions";
 
 function reachable(

@@ -1,7 +1,7 @@
 import * as http from "node:http";
 import { EventEmitter } from "node:events";
-import { DashboardClient } from "../dashboard-client";
-import { parseBumpResponse } from "../contracts";
+import { DashboardClient } from "../src/dashboard-client";
+import { parseBumpResponse } from "../src/contracts";
 import { test } from "node:test";
 import { ok } from "./support/assertions";
 

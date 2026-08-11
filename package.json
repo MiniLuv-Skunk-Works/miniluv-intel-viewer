@@ -51,9 +51,9 @@
     "files": [
       ".build/**/*",
       "!.build/tests/**/*",
-      "renderer/index.html",
-      "renderer/icon.png",
-      "renderer/icon-256.png"
+      "src/renderer/index.html",
+      "src/renderer/icon.png",
+      "src/renderer/icon-256.png"
     ],
     "win": {
       "icon": "build/icon.ico",

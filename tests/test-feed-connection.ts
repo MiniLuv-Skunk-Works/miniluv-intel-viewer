@@ -1,6 +1,6 @@
 import type * as http from "node:http";
 import { EventEmitter } from "node:events";
-import { FeedConnectionManager, SseFrameTooLargeError, SseParser } from "../feed-connection";
+import { FeedConnectionManager, SseFrameTooLargeError, SseParser } from "../src/feed-connection";
 import { ok } from "./support/assertions";
 
 interface ClockEntry {

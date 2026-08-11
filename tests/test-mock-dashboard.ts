@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { parseClaimResponse } from "../contracts";
-import { DashboardClient } from "../dashboard-client";
-import { FeedConnectionManager } from "../feed-connection";
+import { parseClaimResponse } from "../src/contracts";
+import { DashboardClient } from "../src/dashboard-client";
+import { FeedConnectionManager } from "../src/feed-connection";
 import { MockDashboard } from "./support/mock-dashboard";
 
 describe("local mock dashboard", () => {
