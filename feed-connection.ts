@@ -50,7 +50,7 @@ const DEFAULT_STALE_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_FRAME_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MINIMUM_RETRY_MS = 1_000;
 const DEFAULT_MAXIMUM_RETRY_MS = 30_000;
-const MAX_SEEN_SCAN_IDS = 1_024;
+const MAX_SEEN_SCAN_REVISION_IDS = 1_024;
 
 function defaultRequest(
   url: URL,
@@ -156,8 +156,8 @@ export class FeedConnectionManager {
   private retryMs: number;
   private replayEnabled = false;
   private lastEventId: string | null = null;
-  private readonly seenScanIds = new Set<string>();
-  private readonly seenScanIdOrder: string[] = [];
+  private readonly seenScanRevisionIds = new Set<string>();
+  private readonly seenScanRevisionIdOrder: string[] = [];
 
   constructor(options: FeedConnectionOptions) {
     this.callbacks = options;
@@ -194,11 +194,7 @@ export class FeedConnectionManager {
 
   setReplayEnabled(enabled: boolean): void {
     this.replayEnabled = enabled;
-    if (!enabled) {
-      this.lastEventId = null;
-      this.seenScanIds.clear();
-      this.seenScanIdOrder.length = 0;
-    }
+    if (!enabled) this.lastEventId = null;
   }
 
   private current(generation: number): boolean {
@@ -290,19 +286,13 @@ export class FeedConnectionManager {
               for (const message of parser.push(chunk)) {
                 if (
                   message.event === "scan" &&
-                  this.replayEnabled &&
                   message.id &&
-                  this.seenScanIds.has(message.id)
+                  this.seenScanRevisionIds.has(message.id)
                 )
                   continue;
                 const accepted = this.callbacks.onEvent(message);
-                if (
-                  message.event === "scan" &&
-                  this.replayEnabled &&
-                  message.id &&
-                  accepted !== false
-                ) {
-                  this.acceptScanId(message.id);
+                if (message.event === "scan" && message.id && accepted !== false) {
+                  this.acceptScanRevisionId(message.id);
                 }
               }
             } catch (error) {
@@ -416,21 +406,21 @@ export class FeedConnectionManager {
     this.clearConnection();
   }
 
-  private acceptScanId(id: string): void {
-    if (transmissibleHeaderValue(id)) this.lastEventId = id;
-    if (this.seenScanIds.has(id)) return;
-    this.seenScanIds.add(id);
-    this.seenScanIdOrder.push(id);
-    if (this.seenScanIdOrder.length > MAX_SEEN_SCAN_IDS) {
-      const oldest = this.seenScanIdOrder.shift();
-      if (oldest !== undefined) this.seenScanIds.delete(oldest);
+  private acceptScanRevisionId(id: string): void {
+    if (this.replayEnabled && transmissibleHeaderValue(id)) this.lastEventId = id;
+    if (this.seenScanRevisionIds.has(id)) return;
+    this.seenScanRevisionIds.add(id);
+    this.seenScanRevisionIdOrder.push(id);
+    if (this.seenScanRevisionIdOrder.length > MAX_SEEN_SCAN_REVISION_IDS) {
+      const oldest = this.seenScanRevisionIdOrder.shift();
+      if (oldest !== undefined) this.seenScanRevisionIds.delete(oldest);
     }
   }
 
   private resetReplay(): void {
     this.replayEnabled = false;
     this.lastEventId = null;
-    this.seenScanIds.clear();
-    this.seenScanIdOrder.length = 0;
+    this.seenScanRevisionIds.clear();
+    this.seenScanRevisionIdOrder.length = 0;
   }
 }

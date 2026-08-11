@@ -77,6 +77,7 @@ export const PROTOCOL_CAPABILITIES = {
   clipboardRelay: "clipboard-relay",
   clipboardVocabulary: "clipboard-vocabulary",
   scanReplay: "scan-replay",
+  scanUpdates: "scan-updates",
 } as const;
 
 export type KnownCapability = (typeof PROTOCOL_CAPABILITIES)[keyof typeof PROTOCOL_CAPABILITIES];
@@ -597,6 +598,11 @@ export function parsePairRequest(value: unknown): PairRequest | null {
 
 export function parseScanId(value: unknown): string | null {
   return boundedString(value, VALIDATION_LIMITS.id, 1);
+}
+
+export function parseScanRevisionId(value: unknown): string | null {
+  const id = boundedString(value, VALIDATION_LIMITS.id, 1);
+  return id && !/[\r\n\0]/.test(id) ? id : null;
 }
 
 export function parseOpacity(value: unknown): OpacityLevel | null {

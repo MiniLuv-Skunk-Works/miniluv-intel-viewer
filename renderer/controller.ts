@@ -208,7 +208,7 @@ export function startRenderer(
     setShellInert(false);
     if (restoreFocus) focusScanOrList(restoreId);
   }
-  function openDetail(id: string): void {
+  function openDetail(id: string, focusClose = true): void {
     const scan = scans.find((candidate) => candidate.id === id);
     if (!scan || activeOverlay === "pair") return;
     $("detailTitle").textContent = (scan.hull || "Unknown") + "  \u00B7  " + (scan.system || "?");
@@ -279,7 +279,7 @@ export function startRenderer(
     setShellInert(true);
     $("detail").classList.add("show");
     $("detail").removeAttribute("aria-hidden");
-    $("detailClose").focus();
+    if (focusClose) $("detailClose").focus();
   }
 
   function closePair(restoreFocus = true): void {
@@ -970,9 +970,16 @@ export function startRenderer(
     });
   });
   api.onScan((scan) => {
-    scans.unshift(scan);
-    if (scans.length > 40) scans.pop();
+    const existingIndex = scans.findIndex((candidate) => candidate.id === scan.id);
+    const refreshDetail = activeOverlay === "detail" && detailScanId === scan.id;
+    if (existingIndex === -1) {
+      scans.unshift(scan);
+      if (scans.length > 40) scans.pop();
+    } else {
+      scans[existingIndex] = scan;
+    }
     render();
+    if (refreshDetail) openDetail(scan.id, false);
   });
   api.onStatus(setStatus);
   api.onUnpaired(() => {

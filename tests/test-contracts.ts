@@ -18,6 +18,7 @@ import {
   parsePairResult,
   parseScan,
   parseScanId,
+  parseScanRevisionId,
   parseSettings,
   parseSettingsDocument,
   parseViewerState,
@@ -115,6 +116,12 @@ ok(
   parseScanId("scan-1") === "scan-1" &&
     parseScanId("") === null &&
     parseScanId("x".repeat(257)) === null,
+);
+ok(
+  "scan revision ids are independent and SSE-safe",
+  parseScanRevisionId("revision-1") === "revision-1" &&
+    parseScanRevisionId("scan-1") === "scan-1" &&
+    parseScanRevisionId("bad\nrevision") === null,
 );
 ok("no-argument calls are strict", parseNoArguments(undefined) && !parseNoArguments({}));
 
@@ -456,8 +463,9 @@ ok(
 const fixtureReplay = asRecord(namedValue(fixture, ["replay"]));
 const fixtureReplayStates = asRecord(fixtureReplay?.states);
 ok(
-  "fixture replay cursor matches the scan event",
-  fixtureReplay?.scanEventId === parseScan(eventValue(fixture, ["scan", "scanEvent"]))?.id,
+  "fixture replay cursor is a valid revision distinct from the stable scan ID",
+  parseScanRevisionId(fixtureReplay?.scanEventId) !== null &&
+    fixtureReplay?.scanEventId !== parseScan(eventValue(fixture, ["scan", "scanEvent"]))?.id,
 );
 ok(
   "fixture Last-Event-ID is portable",

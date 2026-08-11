@@ -77,6 +77,7 @@ Version 1 recognizes these capabilities:
 - `clipboard-relay`
 - `clipboard-vocabulary`
 - `scan-replay`
+- `scan-updates`
 
 Unknown capability strings are ignored. A version-1 dashboard that omits a
 known capability remains connected, but the corresponding optional operation
@@ -92,11 +93,14 @@ not persisted because the dashboard remains the source of truth.
 
 ## Replay and connection ownership
 
-When `scan-replay` is advertised, each scan frame places its stable scan ID in
-the SSE `id` field. The viewer retains the latest validated, HTTP-header-safe
-cursor in memory for the current pairing and sends it as `Last-Event-ID` after
-a network interruption. Replayed and live events are deduplicated by stable scan
-ID. Bump events do not advance the scan cursor.
+When `scan-replay` is advertised, each scan frame places its publication
+revision ID in the SSE `id` field. The revision ID is independent from the
+payload's stable `scan.id`, which remains the identity used by the renderer and
+bump controls. The viewer retains the latest validated, HTTP-header-safe
+revision cursor in memory for the current pairing and sends it as
+`Last-Event-ID` after a network interruption. Replayed and live events are
+deduplicated by revision ID, so a new revision of an existing stable scan is
+delivered as an in-place update. Bump events do not advance the scan cursor.
 
 If a cursor cannot be represented safely in an HTTP header, the viewer sends
 the last safe cursor and accepts a wider replay window; deduplication removes

@@ -106,7 +106,7 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     dashboard.disconnectFeeds();
     await dashboard.waitForFeedCount(1);
     const feeds = dashboard.requests.filter((request) => request.path === "/api/feed");
-    expect(feeds.at(-1)?.lastEventId).toBe(`scan-${hostile}`);
+    expect(feeds.at(-1)?.lastEventId).toBe(`revision-scan-${hostile}`);
     dashboard.sendHello();
     dashboard.sendScan({ id: `scan-${hostile}`, at: Date.now(), hull: "duplicate" });
     dashboard.sendScan({ id: "scan-after-reconnect", at: Date.now(), hull: "Providence" });

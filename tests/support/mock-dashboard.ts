@@ -72,8 +72,8 @@ export class MockDashboard {
     });
   }
 
-  sendScan(scan: Scan): void {
-    this.send("scan", scan, scan.id);
+  sendScan(scan: Scan, revisionId = `revision-${scan.id}`): void {
+    this.send("scan", scan, revisionId);
   }
 
   disconnectFeeds(): void {

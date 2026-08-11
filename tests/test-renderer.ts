@@ -249,17 +249,52 @@ async function run(): Promise<void> {
   runtime.monoNow += 30000;
   runtime.intervals.forEach((callback) => callback());
   ok("monotonic countdown advances 30 seconds to about 90 seconds", bumpLabel("Hull 3") === "1:30");
-  api.emitScan(scan("rerender-scan", "Rerender Hull"));
+  const beforeUpdate = Array.from(document.querySelectorAll<HTMLElement>(".scan .hull")).map(
+    (node) => node.textContent,
+  );
+  api.emitScan({ ...scan(targetId, "Updated Hull 3"), notes: "Edited in History" });
+  const afterUpdate = Array.from(document.querySelectorAll<HTMLElement>(".scan .hull")).map(
+    (node) => node.textContent,
+  );
   ok(
-    "active bump survives a feed re-render without resetting",
-    bumpLabel("Hull 3") === "1:30" &&
-      articleFor("Hull 3")?.querySelector<HTMLElement>(".bumprow")?.hidden === false,
+    "a stable scan ID is replaced at the same position instead of duplicated",
+    document.querySelectorAll(".scan").length === hostileIds.length &&
+      articleFor("Hull 3") === null &&
+      beforeUpdate.indexOf("Hull 3") === afterUpdate.indexOf("Updated Hull 3"),
+    afterUpdate,
+  );
+  ok(
+    "active bump survives an in-place scan edit without resetting",
+    bumpLabel("Updated Hull 3") === "1:30" &&
+      articleFor("Updated Hull 3")?.querySelector<HTMLElement>(".bumprow")?.hidden === false,
+  );
+  articleFor("Updated Hull 3")?.querySelector<HTMLButtonElement>(".bumpbtn")?.click();
+  await flush();
+  ok(
+    "the edited scan's bump control retains its stable scan ID",
+    api.bumpCalls[1] === targetId,
+    api.bumpCalls,
   );
   api.emitBumpCleared({ scanId: targetId });
   ok(
     "clearing uses the exact mapped timer",
-    articleFor("Hull 3")?.querySelector<HTMLElement>(".bumprow")?.hidden === true,
+    articleFor("Updated Hull 3")?.querySelector<HTMLElement>(".bumprow")?.hidden === true,
   );
+  const filterQuery = document.getElementById("filterQuery") as HTMLInputElement;
+  filterQuery.value = "Updated Hull 3";
+  filterQuery.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
+  ok(
+    "the active filter is applied to the edited scan",
+    document.querySelectorAll(".scan").length === 1,
+  );
+  api.emitScan(scan(targetId, "Filtered Out Hull"));
+  ok(
+    "filters are reapplied after an in-place edit",
+    document.querySelectorAll(".scan").length === 0 &&
+      document.getElementById("list")?.textContent?.includes("No scans match"),
+  );
+  filterQuery.value = "";
+  filterQuery.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
   ok(
     "server IDs never become selectors or DOM IDs",
     !source.includes("CSS.escape") && !source.includes("data-bump") && !source.includes("data-id"),
