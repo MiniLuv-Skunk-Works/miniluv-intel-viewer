@@ -50,8 +50,9 @@ npm run verify
 ```
 
 The verification gate checks formatting, lint rules, and TypeScript types; runs
-the test suites; creates the portable executable; and launches that exact
-artifact to confirm the pairing window renders and the process exits cleanly.
+the test suites, including protocol-v2 scenario and replay coverage; creates the
+portable executable; and launches that exact artifact to confirm the pairing
+window renders and the process exits cleanly.
 
 To package without running the complete gate:
 
@@ -87,24 +88,31 @@ After `npm run build`, close any development copy and launch
 
 1. The transparent always-on-top window opens and cycles through all three opacity levels.
 2. Pairing succeeds, the connection becomes live, and a scan opens its detail view.
-3. Bump and clear controls work and bump countdowns continue through a feed re-render.
-4. Clipboard watching starts only after clicking its control, reports a capture, and can be turned off again.
-5. Tray Show, Clear feed, Re-pair, Reset position, and Quit actions remain reachable.
-6. Re-pairing removes the old feed state, and Quit exits both the window and tray process.
-7. `settings.json` contains no bearer token after pairing or legacy migration; `credential.bin` is present and opaque.
-8. Remote HTTP and loopback HTTP without the development switch show actionable pairing errors.
-9. The packaged renderer uses `contextIsolation: true`, `nodeIntegration: false`, and `sandbox: true`.
-10. Disconnecting the dashboard changes the viewer to reconnecting within the bounded timeout, and restoring it resumes one live feed.
-11. Rapidly pairing to another dashboard never reconnects to or displays events from the previous dashboard.
-12. Moving and resizing rapidly, quitting immediately, and relaunching retains the final bounds.
-13. A window saved on a secondary display, including one with negative coordinates, reopens on that display.
-14. Changing that display's resolution or DPI, or unplugging it, leaves the running and relaunched viewer reachable.
-15. Reset position works from primary and secondary displays and resets within the nearest display's work area.
-16. A live feed becomes stale after the bounded silence period, shows its last successful event time, and returns to live after activity.
-17. Filters change only the visible feed; matching fresh scans can still alert when alerts are enabled.
-18. Quiet hours and persistent mute suppress alerts, replayed scans do not alert, and detailed lock-screen text appears only after explicit opt-in.
-19. Diagnostics show version, dashboard origin, connection state, last event, and redacted errors without scan content or credentials.
-20. Stable update awareness shows bounded plain-text notes and opens only the repository release page; it never downloads or launches an executable.
+3. The universal prepped state, security, tank-state, and implant controls update
+   every retained scan; choices survive a restart, remain local to this viewer,
+   and show an explicit unavailable state when the dashboard cannot calculate.
+4. A replayed feed is calculated in one bounded batch after replay settles, a
+   live scan or revision refreshes only its stable scan ID, and changing the
+   universal scenario refreshes all retained scans without stale results
+   replacing the new selection.
+5. Bump and clear controls work and bump countdowns continue through a feed re-render.
+6. Clipboard watching starts only after clicking its control, reports a capture, and can be turned off again.
+7. Tray Show, Clear feed, Re-pair, Reset position, and Quit actions remain reachable.
+8. Re-pairing removes the old feed state, and Quit exits both the window and tray process.
+9. `settings.json` contains no bearer token after pairing or legacy migration; `credential.bin` is present and opaque.
+10. Remote HTTP and loopback HTTP without the development switch show actionable pairing errors.
+11. The packaged renderer uses `contextIsolation: true`, `nodeIntegration: false`, and `sandbox: true`.
+12. Disconnecting the dashboard changes the viewer to reconnecting within the bounded timeout, and restoring it resumes one live feed.
+13. Rapidly pairing to another dashboard never reconnects to or displays events from the previous dashboard.
+14. Moving and resizing rapidly, quitting immediately, and relaunching retains the final bounds.
+15. A window saved on a secondary display, including one with negative coordinates, reopens on that display.
+16. Changing that display's resolution or DPI, or unplugging it, leaves the running and relaunched viewer reachable.
+17. Reset position works from primary and secondary displays and resets within the nearest display's work area.
+18. A live feed becomes stale after the bounded silence period, shows its last successful event time, and returns to live after activity.
+19. Filters change only the visible feed; matching fresh scans can still alert when alerts are enabled.
+20. Quiet hours and persistent mute suppress alerts, replayed scans do not alert, and detailed lock-screen text appears only after explicit opt-in.
+21. Diagnostics show version, dashboard origin, connection state, last event, and redacted errors without scan content or credentials.
+22. Stable update awareness shows bounded plain-text notes and opens only the repository release page; it never downloads or launches an executable.
 
 The automated packaged smoke test covers launch, local rendering, and shutdown.
 Pairing, tray, live-feed, bump, clipboard, native notifications, update links,

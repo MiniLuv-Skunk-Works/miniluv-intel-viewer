@@ -28,10 +28,12 @@ and the manual Windows smoke-test procedure.
 5. Run the relevant tests while developing, then run `npm run verify` before requesting review.
 6. Open a pull request against `main` that explains the problem, approach, security impact, and verification performed.
 
-Protocol changes must remain backward compatible during independent dashboard
-and viewer releases. The dashboard remains the wire-protocol source of truth;
-portable fixtures should catch drift without making the public viewer depend on
-private dashboard packages.
+The dashboard remains the wire-protocol source of truth. Additive fields and
+capability-gated optional behavior should preserve independent releases. A
+semantic break requires a protocol-version increase and a coordinated dashboard
+and viewer release; unsupported older and future versions must fail explicitly
+instead of silently falling back. Portable fixtures should catch drift without
+making the public viewer depend on private dashboard packages.
 
 ## Generated and sensitive files
 

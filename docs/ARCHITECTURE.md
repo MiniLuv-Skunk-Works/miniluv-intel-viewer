@@ -56,10 +56,12 @@ normalized before they reach the renderer and must not expose credentials.
 
 ## Persistence and credentials
 
-Non-secret settings remain in memory and are written atomically to
-`settings.json` after a debounce. The EVE vocabulary cache uses the same safe
-replacement model. Corrupt JSON is preserved with a `.corrupt-<timestamp>`
-suffix rather than silently overwritten.
+Non-secret settings, including the universal combat scenario, remain in memory
+and are written atomically to `settings.json` after a debounce. Older valid
+preference files without a scenario migrate to the safe default: prepped, 0.5
+security, active tank, and no implant package. The EVE vocabulary cache uses the
+same safe replacement model. Corrupt JSON is preserved with a
+`.corrupt-<timestamp>` suffix rather than silently overwritten.
 
 The dashboard bearer credential is stored separately in `credential.bin` and
 encrypted with Electron `safeStorage` on Windows. A legacy plaintext token is
@@ -142,9 +144,11 @@ without another retained scan.
 
 ## User preferences, notifications, and updates
 
-Alert and filter preferences are non-secret settings validated on disk and at
-the IPC boundary. The sandboxed renderer may edit those preferences, but the
-main process evaluates alert rules and owns Electron's native notification API.
+Alert, filter, and combat-scenario preferences are non-secret settings validated
+on disk and at the IPC boundary. The sandboxed renderer may edit those
+preferences, but the main process evaluates alert rules, owns Electron's native
+notification API, and performs authenticated scenario-calculation requests. The
+scenario is not added to shared scan events or persisted by the dashboard.
 Alert matching uses `valueSplit`; configured alert categories use OR semantics,
 while the compact text/minimum-value feed filters use AND semantics and never
 affect alert evaluation.
