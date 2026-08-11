@@ -32,7 +32,7 @@ if ($actual -cne $expected) { throw "SHA-256 checksum mismatch for $download" }
 
 GitHub also records signed build provenance for stable and continuous
 executables. Stable releases include an SPDX JSON software bill of materials
-and an SBOM attestation. See [RELEASING.md](RELEASING.md) for the complete
+and an SBOM attestation. See [RELEASING.md](docs/RELEASING.md) for the complete
 verification commands.
 
 ## Setup
@@ -122,7 +122,7 @@ real-Electron tests; builds `dist\MILF-Viewer-<version>.exe`; and launches the
 packaged artifact for a render-and-quit smoke test.
 
 For detailed setup, packaging, troubleshooting, and manual Windows checks, see
-[BUILD.md](BUILD.md). Outside contributors should also read
+[BUILD.md](docs/BUILD.md). Outside contributors should also read
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Architecture and protocol
@@ -136,7 +136,7 @@ cursor and duplicate suppression.
 The viewer supports dashboard protocol version 1, remains usable with legacy
 dashboards, disables unsafe writes for newer protocol versions, and has no
 runtime dependency on dashboard source packages. See
-[ARCHITECTURE.md](ARCHITECTURE.md) for component responsibilities, trust
+[ARCHITECTURE.md](docs/ARCHITECTURE.md) for component responsibilities, trust
 boundaries, data flow, protocol capabilities, replay behavior, and compatibility
 rules.
 
@@ -148,7 +148,7 @@ tags whose commits are part of `main`. Stable releases contain the executable,
 checksum, SPDX SBOM, and attestations. Build/test jobs are read-only, and
 publication happens in separate least-privilege jobs.
 
-See [RELEASING.md](RELEASING.md) for the canonical release procedure.
+See [RELEASING.md](docs/RELEASING.md) for the canonical release procedure.
 
 ## Project policies
 

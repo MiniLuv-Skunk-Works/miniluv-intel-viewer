@@ -13,7 +13,7 @@ const pkg = JSON.parse(source("package.json")) as {
 
 describe("application structure", () => {
   it("keeps Electron lifecycle wiring in the entry point", () => {
-    const main = source("main.ts");
+    const main = source("src/main.ts");
     assert.match(main, /new ViewerController/);
     assert.match(main, /new WindowManager/);
     assert.match(main, /registerIpcHandlers/);
@@ -21,7 +21,7 @@ describe("application structure", () => {
   });
 
   it("keeps the overlay non-injected", () => {
-    assert.match(source("main.ts"), /inject into EVE/);
+    assert.match(source("src/main.ts"), /inject into EVE/);
   });
 
   it("defines the complete local and CI quality gate", () => {
@@ -45,7 +45,7 @@ describe("packaging", () => {
   it("packages compiled production code and renderer assets only", () => {
     assert.ok(pkg.build.files.includes(".build/**/*"));
     assert.ok(pkg.build.files.includes("!.build/tests/**/*"));
-    assert.ok(pkg.build.files.includes("renderer/index.html"));
+    assert.ok(pkg.build.files.includes("src/renderer/index.html"));
     assert.equal(pkg.build.win.target[0]?.target, "portable");
   });
 });

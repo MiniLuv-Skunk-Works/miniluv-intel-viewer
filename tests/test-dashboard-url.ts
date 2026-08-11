@@ -1,4 +1,4 @@
-import { parseDashboardOrigin } from "../dashboard-url";
+import { parseDashboardOrigin } from "../src/dashboard-url";
 import { ok } from "./support/assertions";
 
 console.log("\n=== dashboard origin policy ===");

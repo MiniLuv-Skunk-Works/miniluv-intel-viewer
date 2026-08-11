@@ -4,18 +4,26 @@ This document describes the runtime boundaries and compatibility model that
 maintainers must preserve. It is an overview, not a second source of truth for
 the TypeScript contracts.
 
+## Repository layout
+
+- `src/` contains all application TypeScript and renderer assets.
+- `tests/` contains unit, Electron, and packaged-application tests.
+- `scripts/` contains build tooling, while `build/` contains packaging assets.
+- `docs/` contains architecture, build, release, and planning documentation.
+- `.build/`, `dist/`, and `output/` are generated and are not source directories.
+
 ## Runtime boundaries
 
 MILF Viewer uses Electron's main, preload, and renderer separation:
 
-1. `main.ts` composes the application, owns Electron lifecycle events, and
+1. `src/main.ts` composes the application, owns Electron lifecycle events, and
    coordinates graceful shutdown.
-2. `viewer-controller.ts` orchestrates pairing, protocol state, feed events,
+2. `src/viewer-controller.ts` orchestrates pairing, protocol state, feed events,
    bump requests, vocabulary loading, clipboard relay, and unpairing.
 3. Main-process modules own privileged operations: HTTPS requests and SSE,
    encrypted credentials, settings files, clipboard access, windows, displays,
    and the tray.
-4. `preload.ts` exposes the narrow typed `window.milf` API through Electron's
+4. `src/preload.ts` exposes the narrow typed `window.milf` API through Electron's
    context bridge.
 5. The sandboxed renderer builds the interface with browser APIs and receives
    only validated, user-safe data. It has no Node.js or filesystem access.
@@ -42,7 +50,7 @@ dashboard event -> runtime parser -> viewer controller -> window manager
 
 External JSON, SSE frames, stored files, and renderer IPC arguments are treated
 as unknown until their runtime parsers succeed. The shared types in
-`contracts.ts` describe accepted application objects, while `validation.ts`
+`src/contracts.ts` describe accepted application objects, while `src/validation.ts`
 centralizes string, list, timestamp, and numeric bounds. Network failures are
 normalized before they reach the renderer and must not expose credentials.
 
@@ -77,6 +85,7 @@ Version 1 recognizes these capabilities:
 - `clipboard-relay`
 - `clipboard-vocabulary`
 - `scan-replay`
+- `scan-updates`
 
 Unknown capability strings are ignored. A version-1 dashboard that omits a
 known capability remains connected, but the corresponding optional operation
@@ -92,11 +101,14 @@ not persisted because the dashboard remains the source of truth.
 
 ## Replay and connection ownership
 
-When `scan-replay` is advertised, each scan frame places its stable scan ID in
-the SSE `id` field. The viewer retains the latest validated, HTTP-header-safe
-cursor in memory for the current pairing and sends it as `Last-Event-ID` after
-a network interruption. Replayed and live events are deduplicated by stable scan
-ID. Bump events do not advance the scan cursor.
+When `scan-replay` is advertised, each scan frame places its publication
+revision ID in the SSE `id` field. The revision ID is independent from the
+payload's stable `scan.id`, which remains the identity used by the renderer and
+bump controls. The viewer retains the latest validated, HTTP-header-safe
+revision cursor in memory for the current pairing and sends it as
+`Last-Event-ID` after a network interruption. Replayed and live events are
+deduplicated by revision ID, so a new revision of an existing stable scan is
+delivered as an in-place update. Bump events do not advance the scan cursor.
 
 If a cursor cannot be represented safely in an HTTP header, the viewer sends
 the last safe cursor and accepts a wider replay window; deduplication removes

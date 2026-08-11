@@ -1,7 +1,7 @@
 import * as http from "node:http";
 import type { Socket } from "node:net";
 import { once } from "node:events";
-import { PROTOCOL_CAPABILITIES, type Scan } from "../../contracts";
+import { PROTOCOL_CAPABILITIES, type Scan } from "../../src/contracts";
 
 export interface RecordedRequest {
   method: string;
@@ -72,8 +72,8 @@ export class MockDashboard {
     });
   }
 
-  sendScan(scan: Scan): void {
-    this.send("scan", scan, scan.id);
+  sendScan(scan: Scan, revisionId = `revision-${scan.id}`): void {
+    this.send("scan", scan, revisionId);
   }
 
   disconnectFeeds(): void {

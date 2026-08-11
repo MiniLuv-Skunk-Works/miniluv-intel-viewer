@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { parseClaimResponse } from "../contracts";
-import { DashboardClient } from "../dashboard-client";
-import { FeedConnectionManager } from "../feed-connection";
+import { parseClaimResponse } from "../src/contracts";
+import { DashboardClient } from "../src/dashboard-client";
+import { FeedConnectionManager } from "../src/feed-connection";
 import { MockDashboard } from "./support/mock-dashboard";
 
 describe("local mock dashboard", () => {
@@ -20,15 +20,21 @@ describe("local mock dashboard", () => {
     });
     assert.equal(claim.ok && claim.body.token, dashboard.token);
 
-    const events: string[] = [];
+    const events: Array<{ revisionId: string; scanId: string; hull?: string }> = [];
     const feed = new FeedConnectionManager({
       minimumRetryMs: 10,
       maximumRetryMs: 20,
       random: () => 0,
       onStatus: () => undefined,
       onEvent: (message) => {
-        events.push(message.event);
-        return message.event === "scan";
+        if (message.event !== "scan" || !message.id) return false;
+        const scan = JSON.parse(message.data) as { id: string; hull?: string };
+        events.push({
+          revisionId: message.id,
+          scanId: scan.id,
+          ...(scan.hull === undefined ? {} : { hull: scan.hull }),
+        });
+        return true;
       },
       onUnauthorized: () => assert.fail("unexpected authentication failure"),
     });
@@ -36,15 +42,26 @@ describe("local mock dashboard", () => {
     try {
       feed.setReplayEnabled(true);
       await dashboard.waitForFeedCount(1);
-      dashboard.sendScan({ id: "scan-1", at: Date.now(), hull: "Obelisk" });
-      await waitFor(() => events.includes("scan"));
+      dashboard.sendScan({ id: "scan-1", at: Date.now(), hull: "Obelisk" }, "revision-1");
+      dashboard.sendScan({ id: "scan-1", at: Date.now(), hull: "Bowhead" }, "revision-2");
+      dashboard.sendScan({ id: "scan-1", at: Date.now(), hull: "Bowhead" }, "revision-2");
+      await waitFor(() => events.length === 2);
 
       dashboard.disconnectFeeds();
       await dashboard.waitForFeedCount(1);
       const reconnect = dashboard.requests
         .filter((request) => request.path.endsWith("/feed"))
         .at(-1);
-      assert.equal(reconnect?.lastEventId, "scan-1");
+      assert.equal(reconnect?.lastEventId, "revision-2");
+
+      dashboard.sendScan({ id: "scan-1", at: Date.now(), hull: "Bowhead" }, "revision-2");
+      dashboard.sendScan({ id: "scan-1", at: Date.now(), hull: "Orca" }, "revision-3");
+      await waitFor(() => events.length === 3);
+      assert.deepEqual(events, [
+        { revisionId: "revision-1", scanId: "scan-1", hull: "Obelisk" },
+        { revisionId: "revision-2", scanId: "scan-1", hull: "Bowhead" },
+        { revisionId: "revision-3", scanId: "scan-1", hull: "Orca" },
+      ]);
     } finally {
       feed.stop();
     }

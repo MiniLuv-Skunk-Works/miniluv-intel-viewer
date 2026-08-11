@@ -5,7 +5,8 @@
     "bump-control",
     "clipboard-relay",
     "clipboard-vocabulary",
-    "scan-replay"
+    "scan-replay",
+    "scan-updates"
   ],
   "events": {
     "hello": {
@@ -17,7 +18,8 @@
         "bump-control",
         "clipboard-relay",
         "clipboard-vocabulary",
-        "scan-replay"
+        "scan-replay",
+        "scan-updates"
       ],
       "replay": {
         "status": "snapshot"
@@ -92,8 +94,8 @@
     }
   },
   "replay": {
-    "scanEventId": "fixture-scan-0001",
-    "lastEventIdHeader": "fixture-scan-0001",
+    "scanEventId": "fixture-revision-0001",
+    "lastEventIdHeader": "fixture-revision-0001",
     "states": {
       "snapshot": {
         "status": "snapshot"

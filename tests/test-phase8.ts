@@ -6,7 +6,7 @@ import {
   notificationForScan,
   scanMatchesAlert,
   scanMatchesFilter,
-} from "../alerting";
+} from "../src/alerting";
 import {
   defaultUserPreferences,
   parseConnectionStatus,
@@ -14,9 +14,9 @@ import {
   type Scan,
   type UpdateCache,
   type UpdateInfo,
-} from "../contracts";
-import { DiagnosticsRecorder } from "../diagnostics";
-import { allowedReleaseUrl, compareVersions, UpdateChecker } from "../update-checker";
+} from "../src/contracts";
+import { DiagnosticsRecorder } from "../src/diagnostics";
+import { allowedReleaseUrl, compareVersions, UpdateChecker } from "../src/update-checker";
 
 const scan: Scan = {
   id: "scan-1",

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ClipboardWatcher } from "../clipboard-watcher";
-import type { ClipboardCapture } from "../contracts";
+import { ClipboardWatcher } from "../src/clipboard-watcher";
+import type { ClipboardCapture } from "../src/contracts";
 
 describe("ClipboardWatcher", () => {
   it("seeds existing text, filters locally, and reports later valid captures", () => {

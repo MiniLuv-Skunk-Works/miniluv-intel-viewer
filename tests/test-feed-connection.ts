@@ -1,6 +1,6 @@
 import type * as http from "node:http";
 import { EventEmitter } from "node:events";
-import { FeedConnectionManager, SseFrameTooLargeError, SseParser } from "../feed-connection";
+import { FeedConnectionManager, SseFrameTooLargeError, SseParser } from "../src/feed-connection";
 import { ok } from "./support/assertions";
 
 interface ClockEntry {
@@ -229,7 +229,7 @@ ok(
 console.log("\n=== offline scan replay ===");
 const replayClock = new FakeClock();
 const replayTransport = harness();
-const replayedScans: string[] = [];
+const replayedScans: Array<{ revisionId: string; scanId: string; hull?: string }> = [];
 const replayManager = new FeedConnectionManager({
   request: replayTransport.request,
   setTimer: replayClock.set,
@@ -238,14 +238,18 @@ const replayManager = new FeedConnectionManager({
   onStatus: () => {},
   onEvent: (message) => {
     if (message.event !== "scan") return true;
-    const payload = JSON.parse(message.data) as { id?: unknown; at?: unknown };
+    const payload = JSON.parse(message.data) as { id?: unknown; at?: unknown; hull?: unknown };
     if (
       typeof payload.id !== "string" ||
       typeof payload.at !== "number" ||
-      message.id !== payload.id
+      typeof message.id !== "string"
     )
       return false;
-    replayedScans.push(payload.id);
+    replayedScans.push({
+      revisionId: message.id,
+      scanId: payload.id,
+      ...(typeof payload.hull === "string" ? { hull: payload.hull } : {}),
+    });
     return true;
   },
   onUnauthorized: () => {},
@@ -253,7 +257,10 @@ const replayManager = new FeedConnectionManager({
 replayManager.start({ serverUrl: "https://replay.example", token: "token" });
 const firstReplayResponse = replayTransport.attempts[0]?.respond();
 replayManager.setReplayEnabled(true);
-firstReplayResponse?.emit("data", 'event: scan\nid: scan-1\ndata: {"id":"scan-1","at":1}\n\n');
+firstReplayResponse?.emit(
+  "data",
+  'event: scan\nid: revision-1\ndata: {"id":"scan-1","at":1,"hull":"Original"}\n\n',
+);
 firstReplayResponse?.emit("end");
 const firstReplayRetry = replayClock.active(500)[0];
 if (firstReplayRetry) replayClock.run(firstReplayRetry);
@@ -261,20 +268,24 @@ ok(
   "reconnect sends the latest accepted scan cursor",
   (replayTransport.attempts[1]?.options.headers as Record<string, string> | undefined)?.[
     "Last-Event-ID"
-  ] === "scan-1",
+  ] === "revision-1",
 );
 const secondReplayResponse = replayTransport.attempts[1]?.respond();
 secondReplayResponse?.emit(
   "data",
-  'event: scan\nid: scan-1\ndata: {"id":"scan-1","at":1}\n\n' +
-    'event: scan\nid: scan-2\ndata: {"id":"scan-2","at":2}\n\n' +
-    'event: scan\nid: Unicode Ω\ndata: {"id":"Unicode Ω","at":3}\n\n' +
-    'event: scan\nid: Unicode Ω\ndata: {"id":"Unicode Ω","at":3}\n\n' +
+  'event: scan\nid: revision-1\ndata: {"id":"scan-1","at":1,"hull":"Original"}\n\n' +
+    'event: scan\nid: revision-2\ndata: {"id":"scan-1","at":2,"hull":"Edited"}\n\n' +
+    'event: scan\nid: revision-3\ndata: {"id":"scan-2","at":3}\n\n' +
+    'event: scan\nid: Unicode Ω\ndata: {"id":"scan-3","at":4}\n\n' +
+    'event: scan\nid: Unicode Ω\ndata: {"id":"scan-3","at":4}\n\n' +
     'event: scan\nid: malformed\ndata: {"id":"malformed"}\n\n',
 );
 ok(
-  "replayed, live, and Unicode scan IDs are delivered exactly once",
-  replayedScans.join(",") === "scan-1,scan-2,Unicode Ω",
+  "duplicate revisions are suppressed while a new revision of one stable scan is delivered",
+  replayedScans
+    .map(({ revisionId, scanId, hull }) => [revisionId, scanId, hull].filter(Boolean).join(":"))
+    .join(",") ===
+    "revision-1:scan-1:Original,revision-2:scan-1:Edited,revision-3:scan-2,Unicode Ω:scan-3",
   replayedScans,
 );
 secondReplayResponse?.emit("end");
@@ -284,7 +295,7 @@ ok(
   "rejected or untransmittable IDs cannot advance the replay cursor",
   (replayTransport.attempts[2]?.options.headers as Record<string, string> | undefined)?.[
     "Last-Event-ID"
-  ] === "scan-2",
+  ] === "revision-3",
 );
 replayManager.stop();
 

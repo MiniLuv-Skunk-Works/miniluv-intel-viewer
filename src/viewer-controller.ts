@@ -11,6 +11,7 @@ import {
   parseClipboardRelayResponse,
   parseHelloEvent,
   parseScan,
+  parseScanRevisionId,
   parseServerError,
   parseVocabulary,
   type BumpResult,
@@ -47,6 +48,7 @@ import type { UpdateChecker } from "./update-checker";
 const SMALL_RESPONSE_LIMIT = 64 * 1024;
 const VOCABULARY_RESPONSE_LIMIT = 16 * 1024 * 1024;
 const VOCABULARY_RESPONSE_TIMEOUT_MS = 60_000;
+const MAX_SEEN_STABLE_SCAN_IDS = 1_024;
 
 export type ViewerRelay = <K extends keyof IpcEventContract>(
   channel: K,
@@ -93,6 +95,8 @@ export class ViewerController {
   private lastEventAt: number | undefined;
   private connectionStatus: ConnectionStatus = { state: "unpaired" };
   private replayTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly seenStableScanIds = new Set<string>();
+  private readonly seenStableScanIdOrder: string[] = [];
 
   constructor(options: ViewerControllerOptions) {
     this.settingsStore = options.settingsStore;
@@ -430,6 +434,19 @@ export class ViewerController {
     this.clearReplayTimer();
     this.dashboardClient.cancelAll();
     this.feedConnection.stop();
+    this.seenStableScanIds.clear();
+    this.seenStableScanIdOrder.length = 0;
+  }
+
+  private rememberStableScanId(id: string): boolean {
+    if (this.seenStableScanIds.has(id)) return true;
+    this.seenStableScanIds.add(id);
+    this.seenStableScanIdOrder.push(id);
+    if (this.seenStableScanIdOrder.length > MAX_SEEN_STABLE_SCAN_IDS) {
+      const oldest = this.seenStableScanIdOrder.shift();
+      if (oldest !== undefined) this.seenStableScanIds.delete(oldest);
+    }
+    return false;
   }
 
   private requestFailureMessage(result: DashboardRequestFailure): string {
@@ -520,11 +537,12 @@ export class ViewerController {
     }
     if (event === "scan") {
       const scan = parseScan(parsed);
-      if (!scan || (id !== undefined && id !== scan.id)) return false;
+      if (!scan || (id !== undefined && parseScanRevisionId(id) === null)) return false;
+      const isUpdate = this.rememberStableScanId(scan.id);
       this.acceptedEvent();
       this.relay("scan", scan);
       if (this.connectionStatus.state === "replaying") this.scheduleReplaySettled(true);
-      else this.alertService.handle(scan);
+      else if (!isUpdate) this.alertService.handle(scan);
       return true;
     }
     if (event === "bump") {
@@ -616,6 +634,7 @@ export class ViewerController {
       "clipboard-relay": "clipboard relay",
       "clipboard-vocabulary": "clipboard vocabulary",
       "scan-replay": "scan replay",
+      "scan-updates": "scan updates",
     };
     const detail =
       "Limited dashboard - " +

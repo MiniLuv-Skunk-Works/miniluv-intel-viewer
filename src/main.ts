@@ -98,7 +98,7 @@ const controller = new ViewerController({
 
 windowManager = new WindowManager({
   settingsStore,
-  rendererDirectory: path.join(__dirname, "..", "renderer"),
+  rendererDirectory: path.join(__dirname, "..", "src", "renderer"),
   compiledDirectory: __dirname,
   actions: {
     quit: () => app.quit(),

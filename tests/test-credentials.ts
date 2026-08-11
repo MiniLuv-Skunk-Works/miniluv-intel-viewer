@@ -1,4 +1,8 @@
-import { CredentialStore, type AsyncSafeStorage, type CredentialFileSystem } from "../credentials";
+import {
+  CredentialStore,
+  type AsyncSafeStorage,
+  type CredentialFileSystem,
+} from "../src/credentials";
 import { test } from "node:test";
 import { ok } from "./support/assertions";
 

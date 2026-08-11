@@ -1,7 +1,7 @@
 {
   "name": "milf-viewer",
   "productName": "MILF Viewer",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "MiniLuv Intel Live Feed - always-on-top scan viewer",
   "engines": {
@@ -51,9 +51,9 @@
     "files": [
       ".build/**/*",
       "!.build/tests/**/*",
-      "renderer/index.html",
-      "renderer/icon.png",
-      "renderer/icon-256.png"
+      "src/renderer/index.html",
+      "src/renderer/icon.png",
+      "src/renderer/icon-256.png"
     ],
     "win": {
       "icon": "build/icon.ico",
