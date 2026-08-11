@@ -133,9 +133,9 @@ validated viewer operations to the sandboxed renderer. The viewer pairs over
 bounded JSON requests and consumes a capability-negotiated SSE feed with replay
 cursor and duplicate suppression.
 
-The viewer supports dashboard protocol version 1, remains usable with legacy
-dashboards, disables unsafe writes for newer protocol versions, and has no
-runtime dependency on dashboard source packages. See
+The viewer supports dashboard protocol version 2 as a clean break. It rejects
+legacy, version-1, and future protocol feeds, and has no runtime dependency on
+dashboard source packages. See
 [ARCHITECTURE.md](docs/ARCHITECTURE.md) for component responsibilities, trust
 boundaries, data flow, protocol capabilities, replay behavior, and compatibility
 rules.

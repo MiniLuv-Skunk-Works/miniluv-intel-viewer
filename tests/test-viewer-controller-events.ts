@@ -57,7 +57,7 @@ describe("viewer scan revisions", () => {
 
     const controller = new ViewerController({
       settingsStore: settings,
-      credentials: {} as CredentialStore,
+      credentials: { get: () => null } as CredentialStore,
       vocabularyFile,
       allowInsecureLocalhost: false,
       relay: <K extends keyof IpcEventContract>(channel: K, payload: IpcEventContract[K]) => {
@@ -79,12 +79,31 @@ describe("viewer scan revisions", () => {
       event: "hello",
       data: JSON.stringify({
         name: "Update-aware dashboard",
-        protocolVersion: 1,
+        protocolVersion: 2,
         capabilities: Object.values(PROTOCOL_CAPABILITIES),
       }),
     });
-    const original = { id: "stable-scan", at: 1, hull: "Obelisk" };
-    const edited = { id: "stable-scan", at: 2, hull: "Bowhead" };
+    const scanEvent = (at: number, hull: string) => ({
+      id: "stable-scan",
+      analysisId: "00000000-0000-4000-8000-000000000001",
+      at,
+      scout: "Scout",
+      confidence: "full-fit",
+      hull,
+      system: null,
+      scanGate: null,
+      headGate: null,
+      pilot: null,
+      valueSell: null,
+      valueBuy: null,
+      valueSplit: null,
+      droppableSplit: null,
+      notes: null,
+      fitEft: null,
+      cargoList: [],
+    });
+    const original = scanEvent(1, "Obelisk");
+    const edited = scanEvent(2, "Bowhead");
     assert.equal(
       callbacks.onEvent({ event: "scan", id: "revision-1", data: JSON.stringify(original) }),
       true,
@@ -107,6 +126,23 @@ describe("viewer scan revisions", () => {
       alertedScans.map((scan) => scan.hull),
       ["Obelisk"],
     );
+    callbacks.onEvent({
+      event: "hello",
+      data: JSON.stringify({
+        name: "Old dashboard",
+        protocolVersion: 1,
+        capabilities: Object.values(PROTOCOL_CAPABILITIES),
+      }),
+    });
+    assert.equal(
+      callbacks.onEvent({
+        event: "scan",
+        id: "revision-old",
+        data: JSON.stringify({ id: "old-scan", at: 3, hull: "Charon" }),
+      }),
+      false,
+    );
+    assert.equal(relayedScans.length, 2);
     await controller.shutdown();
   });
 });

@@ -354,17 +354,12 @@ async function run(): Promise<void> {
     pilot: payload,
     scanGate: payload,
     headGate: payload,
-    ammo: payload,
-    sec: payload,
-    prepped: payload,
     notes: payload,
     fitEft: payload,
     valueSell: 3_000_000_000,
     valueBuy: 2_000_000_000,
     valueSplit: 1_000_000_000,
     droppableSplit: 500_000_000,
-    ehp: 900_000,
-    fleetAll: [{ name: payload, ships: 12 }],
     cargoList: [{ name: payload, qty: 3 }],
   });
   const hostileArticle = articleFor(payload);

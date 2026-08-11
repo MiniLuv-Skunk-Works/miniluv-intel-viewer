@@ -8,6 +8,7 @@ import {
   parseBumpEvent,
   parseBumpResponse,
   parseClaimResponse,
+  parseCombatScenario,
   parseClipboardRelayResponse,
   parseClipboardResult,
   parseConnectionStatus,
@@ -19,6 +20,8 @@ import {
   parseScan,
   parseScanId,
   parseScanRevisionId,
+  parseViewerScenarioCalculationRequest,
+  parseViewerScenarioCalculationResponse,
   parseSettings,
   parseSettingsDocument,
   parseViewerState,
@@ -126,57 +129,76 @@ ok(
 ok("no-argument calls are strict", parseNoArguments(undefined) && !parseNoArguments({}));
 
 console.log("\n=== dashboard payload boundaries ===");
-const scan = parseScan({
-  id: "scan-1",
-  at: 1_700_000_000_000,
-  hull: "Obelisk",
-  valueSell: 3_000_000_000,
-  fleetAll: [{ name: "Talos", ships: 12 }],
-  cargoList: [{ name: "Tritanium", qty: 1000 }],
-  futureField: { supportedLater: true },
-});
-ok("valid scan parses", scan?.hull === "Obelisk" && scan.fleetAll?.[0]?.ships === 12);
+function scanEvent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "scan-1",
+    analysisId: "00000000-0000-4000-8000-000000000001",
+    at: 1_700_000_000_000,
+    scout: "Scout",
+    confidence: "full-fit",
+    hull: "Obelisk",
+    system: "Uedama",
+    pilot: null,
+    scanGate: null,
+    headGate: null,
+    valueSell: null,
+    valueBuy: null,
+    valueSplit: null,
+    droppableSplit: null,
+    notes: null,
+    fitEft: null,
+    cargoList: [],
+    ...overrides,
+  };
+}
+
+const scan = parseScan(
+  scanEvent({
+    valueSell: 3_000_000_000,
+    cargoList: [{ name: "Tritanium", qty: 1000 }],
+    futureField: { supportedLater: true },
+  }),
+);
+ok("valid scan parses", scan?.hull === "Obelisk" && scan.cargoList?.[0]?.qty === 1000);
 ok("scan additive fields are discarded", scan !== null && !("futureField" in scan));
 ok(
   "numeric strings are normalized",
-  parseScan({ id: "scan-2", at: "42", ehp: "1000" })?.ehp === 1000,
+  parseScan(scanEvent({ id: "scan-2", at: "42", valueSell: "1000" }))?.valueSell === 1000,
 );
 ok(
   "finite decimal scan values remain wire-compatible",
-  parseScan({
-    id: "scan-decimals",
-    at: 1_700_000_000_000,
-    valueSell: 3_000_000_000.42,
-    valueBuy: "2999999999.75",
-    ehp: 12345.5,
-  })?.valueBuy === 2_999_999_999.75,
+  parseScan(
+    scanEvent({
+      id: "scan-decimals",
+      at: 1_700_000_000_000,
+      valueSell: 3_000_000_000.42,
+      valueBuy: "2999999999.75",
+      droppableSplit: 12345.5,
+    }),
+  )?.valueBuy === 2_999_999_999.75,
 );
-ok("scan requires an id", parseScan({ at: 1 }) === null);
-ok("scan rejects non-finite numbers", parseScan({ id: "bad", at: 1, ehp: Infinity }) === null);
+ok("scan requires an id", parseScan(scanEvent({ id: undefined })) === null);
+ok("scan rejects non-finite numbers", parseScan(scanEvent({ valueSell: Infinity })) === null);
 ok(
-  "scan rejects malformed nested fleet",
-  parseScan({ id: "bad", at: 1, fleetAll: [{ name: "Talos" }] }) === null,
+  "scan rejects removed protocol-v1 calculation fields",
+  ["ehp", "ammo", "fleetAll", "sec", "prepped", "tankState", "implant"].every(
+    (field) => parseScan(scanEvent({ [field]: null })) === null,
+  ),
 );
-ok(
-  "scan rejects malformed nested cargo",
-  parseScan({ id: "bad", at: 1, cargoList: "cargo" }) === null,
-);
-ok(
-  "scan rejects oversized text",
-  parseScan({ id: "bad", at: 1, notes: "x".repeat(64_001) }) === null,
-);
+ok("scan rejects malformed nested cargo", parseScan(scanEvent({ cargoList: "cargo" })) === null);
+ok("scan rejects oversized text", parseScan(scanEvent({ notes: "x".repeat(64_001) })) === null);
 ok(
   "scan rejects oversized nested lists",
-  parseScan({
-    id: "bad",
-    at: 1,
-    fleetAll: Array.from({ length: 1_001 }, () => ({ name: "Talos", ships: 1 })),
-  }) === null,
+  parseScan(
+    scanEvent({
+      cargoList: Array.from({ length: 1_001 }, () => ({ name: "Tritanium", qty: 1 })),
+    }),
+  ) === null,
 );
 ok(
   "scan rejects unsafe and negative numbers",
-  parseScan({ id: "bad", at: -1 }) === null &&
-    parseScan({ id: "bad", at: 1, valueSell: Number.MAX_SAFE_INTEGER + 1 }) === null,
+  parseScan(scanEvent({ at: -1 })) === null &&
+    parseScan(scanEvent({ valueSell: Number.MAX_SAFE_INTEGER + 1 })) === null,
 );
 
 const bump = parseBumpEvent({
@@ -254,17 +276,17 @@ ok(
 );
 const hello = parseHelloEvent({
   name: "MiniLuv",
-  protocolVersion: 1,
+  protocolVersion: 2,
   capabilities: [...KNOWN_CAPABILITIES, "future-feature"],
   replay: { status: "resumed" },
 });
 ok(
-  "viewer declares protocol version 1",
-  VIEWER_PROTOCOL_MIN_VERSION === 1 && VIEWER_PROTOCOL_MAX_VERSION === 1,
+  "viewer declares protocol version 2",
+  VIEWER_PROTOCOL_MIN_VERSION === 2 && VIEWER_PROTOCOL_MAX_VERSION === 2,
 );
 ok(
-  "version-1 replay hello parses",
-  hello?.name === "MiniLuv" && hello.protocolVersion === 1 && hello.replay?.status === "resumed",
+  "version-2 replay hello parses",
+  hello?.name === "MiniLuv" && hello.protocolVersion === 2 && hello.replay?.status === "resumed",
 );
 ok(
   "unknown capabilities are ignored",
@@ -272,26 +294,26 @@ ok(
     !(hello.capabilities as readonly string[]).includes("future-feature"),
 );
 ok(
-  "version-1 full capability set is fully compatible",
+  "version-2 full capability set is fully compatible",
   hello !== null && negotiateProtocol(hello).compatibility === "fully-compatible",
 );
 
 const legacy = parseHelloEvent({ name: "Legacy MiniLuv" });
 ok(
-  "legacy hello remains usable",
+  "legacy hello is rejected as older protocol",
   legacy !== null &&
-    negotiateProtocol(legacy).compatibility === "legacy" &&
-    negotiateProtocol(legacy).capabilities.length === KNOWN_CAPABILITIES.length,
+    negotiateProtocol(legacy).compatibility === "older-protocol" &&
+    negotiateProtocol(legacy).capabilities.length === 0,
 );
 const partialRollout = parseHelloEvent({ name: "Partial MiniLuv", protocolVersion: 1 });
 ok(
-  "either absent negotiation field uses legacy behavior",
-  partialRollout !== null && negotiateProtocol(partialRollout).compatibility === "legacy",
+  "either absent negotiation field is incompatible",
+  partialRollout !== null && negotiateProtocol(partialRollout).compatibility === "older-protocol",
 );
 
 const limited = parseHelloEvent({
   name: "Limited MiniLuv",
-  protocolVersion: 1,
+  protocolVersion: 2,
   capabilities: [PROTOCOL_CAPABILITIES.scanFeed],
 });
 const limitedNegotiation = limited && negotiateProtocol(limited);
@@ -307,24 +329,33 @@ ok(
 
 const future = parseHelloEvent({
   name: "Future MiniLuv",
-  protocolVersion: 2,
+  protocolVersion: 3,
   capabilities: [...KNOWN_CAPABILITIES],
 });
 ok(
   "future protocol is identified without rejecting the hello",
   future !== null && negotiateProtocol(future).compatibility === "newer-protocol",
 );
+const old = parseHelloEvent({
+  name: "Old MiniLuv",
+  protocolVersion: 1,
+  capabilities: [...KNOWN_CAPABILITIES],
+});
+ok(
+  "protocol v1 is identified as incompatible",
+  old !== null && negotiateProtocol(old).compatibility === "older-protocol",
+);
 ok(
   "malformed protocol versions reject",
-  parseHelloEvent({ name: "bad", protocolVersion: 1.5, capabilities: [] }) === null,
+  parseHelloEvent({ name: "bad", protocolVersion: 2.5, capabilities: [] }) === null,
 );
 ok(
   "malformed capability lists reject",
-  parseHelloEvent({ name: "bad", protocolVersion: 1, capabilities: ["scan-feed", 7] }) === null,
+  parseHelloEvent({ name: "bad", protocolVersion: 2, capabilities: ["scan-feed", 7] }) === null,
 );
 ok(
   "hello still requires dashboard name",
-  parseHelloEvent({ protocolVersion: 1, capabilities: [] }) === null,
+  parseHelloEvent({ protocolVersion: 2, capabilities: [] }) === null,
 );
 ok(
   "all replay states parse",
@@ -348,7 +379,7 @@ console.log("\n=== portable dashboard protocol fixture ===");
 const ROOT = path.resolve(__dirname, "..", "..");
 const fixturePath =
   process.env.DASHBOARD_VIEWER_PROTOCOL_FIXTURE ||
-  path.join(ROOT, "tests", "fixtures", "viewer-protocol-v1.json");
+  path.join(ROOT, "tests", "fixtures", "viewer-protocol-v2.json");
 let fixture: unknown = null;
 try {
   fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
@@ -424,17 +455,44 @@ function response(value: unknown): unknown {
 
 const fixtureHello = parseHelloEvent(eventValue(fixture, ["hello", "helloEvent"]));
 ok(
-  "fixture hello matches protocol v1",
-  fixtureHello?.protocolVersion === 1 &&
+  "fixture hello matches protocol v2",
+  fixtureHello?.protocolVersion === 2 &&
     negotiateProtocol(fixtureHello).compatibility === "fully-compatible",
 );
+const fixtureV1 = JSON.parse(
+  fs.readFileSync(path.join(ROOT, "tests", "fixtures", "viewer-protocol-v1.json"), "utf8"),
+) as unknown;
+const fixtureV1Hello = parseHelloEvent(eventValue(fixtureV1, ["hello", "helloEvent"]));
+ok(
+  "protocol-v1 fixture is retained only for rejection",
+  fixtureV1Hello !== null &&
+    negotiateProtocol(fixtureV1Hello).compatibility === "older-protocol" &&
+    parseScan(eventValue(fixtureV1, ["scan", "scanEvent"])) === null,
+);
 ok("fixture scan parses", parseScan(eventValue(fixture, ["scan", "scanEvent"])) !== null);
+const fixtureApiRequests = asRecord(asRecord(fixture)?.apiRequests);
+const fixtureScenarioRequest = parseViewerScenarioCalculationRequest(
+  fixtureApiRequests?.scenarioCalculation,
+);
+ok(
+  "fixture scenario request is bounded and mutually exclusive",
+  fixtureScenarioRequest?.scanIds.length === 3 &&
+    fixtureScenarioRequest.scenario.implant === "none",
+);
 const fixtureBump = parseBumpEvent(eventValue(fixture, ["bumpEvent", "bump"]));
 ok(
   "fixture bump event carries server timing",
   fixtureBump?.at === 1_754_000_005_000 && fixtureBump.remainingMs === 180000,
 );
 const fixtureApiResponses = asRecord(asRecord(fixture)?.apiResponses);
+const fixtureScenarioResponse = parseViewerScenarioCalculationResponse(
+  fixtureApiResponses?.scenarioCalculation,
+);
+ok(
+  "fixture scenario response parses every result status",
+  fixtureScenarioResponse?.results.map((result) => result.status).join(",") ===
+    "ready,unavailable,not-found",
+);
 const fixtureBumpResponse = parseBumpResponse(response(fixtureApiResponses?.bump));
 ok(
   "fixture bump API response carries server timing",
@@ -474,6 +532,45 @@ ok(
 ok(
   "fixture cursor-expiry behavior parses",
   parseViewerReplayMetadata(fixtureReplayStates?.cursorExpired)?.status === "cursor-expired",
+);
+
+console.log("\n=== scenario calculation boundaries ===");
+const scenario = {
+  state: "prepped",
+  securityStatus: "0.5",
+  tankState: "active",
+  implant: "none",
+};
+ok("combat scenario parses", parseCombatScenario(scenario)?.tankState === "active");
+ok("invalid implant rejects", parseCombatScenario({ ...scenario, implant: "both" }) === null);
+ok(
+  "duplicate and oversized batches reject",
+  parseViewerScenarioCalculationRequest({ scanIds: ["a", "a"], scenario }) === null &&
+    parseViewerScenarioCalculationRequest({
+      scanIds: Array.from({ length: 26 }, (_, index) => `scan-${index}`),
+      scenario,
+    }) === null,
+);
+ok(
+  "unbounded response profile maps reject",
+  parseViewerScenarioCalculationResponse({
+    scenario,
+    results: [
+      {
+        scanId: "scan-1",
+        status: "ready",
+        tank: {
+          selectedProfile: "Void (kin/therm)",
+          selectedEhp: 1,
+          ehpByProfile: Object.fromEntries(
+            Array.from({ length: 17 }, (_, index) => [`profile-${index}`, 1]),
+          ),
+          overridden: false,
+        },
+        requirements: [],
+      },
+    ],
+  }) === null,
 );
 
 console.log("\n=== vocabulary, clipboard, and status boundaries ===");
@@ -517,7 +614,7 @@ ok(
   parseConnectionStatus({
     state: "warn",
     compatibility: "newer-protocol",
-    protocolVersion: 2,
+    protocolVersion: 3,
   })?.compatibility === "newer-protocol",
 );
 ok("unknown status rejects", parseConnectionStatus({ state: "teleporting" }) === null);

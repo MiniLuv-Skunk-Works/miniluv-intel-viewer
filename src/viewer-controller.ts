@@ -349,8 +349,13 @@ export class ViewerController {
   }
 
   private supports(capability: KnownCapability): boolean {
-    if (!this.protocol || this.protocol.compatibility === "legacy") return true;
-    if (this.protocol.compatibility === "newer-protocol") return false;
+    if (
+      !this.protocol ||
+      this.protocol.compatibility === "older-protocol" ||
+      this.protocol.compatibility === "newer-protocol"
+    ) {
+      return false;
+    }
     return this.protocol.capabilities.includes(capability);
   }
 
@@ -535,6 +540,15 @@ export class ViewerController {
     } catch {
       return false;
     }
+    if (event !== "hello") {
+      if (
+        !this.protocol ||
+        this.protocol.compatibility === "older-protocol" ||
+        this.protocol.compatibility === "newer-protocol"
+      ) {
+        return false;
+      }
+    }
     if (event === "scan") {
       const scan = parseScan(parsed);
       if (!scan || (id !== undefined && parseScanRevisionId(id) === null)) return false;
@@ -565,15 +579,13 @@ export class ViewerController {
     if (!hello) return false;
     this.acceptedEvent();
     this.protocol = negotiateProtocol(hello);
-    const replaySupported =
-      this.protocol.compatibility !== "legacy" &&
-      this.protocol.compatibility !== "newer-protocol" &&
-      this.protocol.capabilities.includes(PROTOCOL_CAPABILITIES.scanReplay);
+    const replaySupported = this.supports(PROTOCOL_CAPABILITIES.scanReplay);
     this.feedConnection.setReplayEnabled(replaySupported);
     const clipboardSupported =
       this.supports(PROTOCOL_CAPABILITIES.clipboardRelay) &&
       this.supports(PROTOCOL_CAPABILITIES.clipboardVocabulary);
     if (clipboardSupported) {
+      this.fetchVocabulary();
       if (this.clipboardWatching()) this.clipboardWatcher.start();
     } else {
       this.clipboardWatcher.stop();
@@ -606,22 +618,30 @@ export class ViewerController {
           : { protocolVersion: negotiated.protocolVersion }),
       };
     }
-    if (negotiated.compatibility === "legacy") {
-      this.relay("notice", { level: "warn", message: "Legacy dashboard - compatibility mode" });
+    if (negotiated.compatibility === "older-protocol") {
+      const version =
+        negotiated.protocolVersion === undefined
+          ? "legacy"
+          : `protocol v${negotiated.protocolVersion}`;
+      const detail = `Incompatible dashboard ${version} - protocol v2 required`;
+      this.relay("notice", { level: "error", message: detail });
       return {
-        state: "live",
-        detail: "Legacy dashboard - compatibility mode",
+        state: "error",
+        detail,
         compatibility: negotiated.compatibility,
+        ...(negotiated.protocolVersion === undefined
+          ? {}
+          : { protocolVersion: negotiated.protocolVersion }),
       };
     }
     if (negotiated.compatibility === "newer-protocol") {
       this.relay("notice", {
-        level: "warn",
-        message: `Dashboard protocol v${negotiated.protocolVersion} is newer - scan feed only`,
+        level: "error",
+        message: `Incompatible dashboard protocol v${negotiated.protocolVersion} - protocol v2 required`,
       });
       return {
-        state: "live",
-        detail: `Dashboard protocol v${negotiated.protocolVersion} is newer - scan feed only`,
+        state: "error",
+        detail: `Incompatible dashboard protocol v${negotiated.protocolVersion} - protocol v2 required`,
         compatibility: negotiated.compatibility,
         ...(negotiated.protocolVersion === undefined
           ? {}
@@ -635,6 +655,7 @@ export class ViewerController {
       "clipboard-vocabulary": "clipboard vocabulary",
       "scan-replay": "scan replay",
       "scan-updates": "scan updates",
+      "scenario-calculation": "scenario calculations",
     };
     const detail =
       "Limited dashboard - " +

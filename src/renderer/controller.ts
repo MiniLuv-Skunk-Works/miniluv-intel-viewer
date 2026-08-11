@@ -152,10 +152,6 @@ export function startRenderer(
     if (n >= 1e6) return (n / 1e6).toFixed(0) + "M";
     return Math.round(n).toLocaleString();
   }
-  function ehpFmt(n: number | null | undefined): string | null {
-    if (n == null || isNaN(n)) return null;
-    return n >= 1e6 ? (n / 1e6).toFixed(2) + "m" : (n / 1e3).toFixed(0) + "k";
-  }
   function tier(v: number | null | undefined): string {
     if (v == null) return "t1";
     if (v >= 3e9) return "t4";
@@ -237,23 +233,6 @@ export function startRenderer(
         .join("  /  "),
     );
     addKv(body, "Droppable", isk(scan.droppableSplit) ? isk(scan.droppableSplit) + " split" : "");
-    addKv(
-      body,
-      "Tank",
-      ehpFmt(scan.ehp) ? ehpFmt(scan.ehp) + " EHP" + (scan.ammo ? " vs " + scan.ammo : "") : "",
-    );
-    const fleet = scan.fleetAll || [];
-    if (fleet.length) {
-      const title =
-        "Fleet needed" + (scan.sec ? " \u2014 " + scan.sec + ", " + (scan.prepped || "") : "");
-      addSection(
-        body,
-        title,
-        fleet
-          .map((entry) => String(entry.name).padEnd(9) + String(entry.ships).padStart(4))
-          .join("\n"),
-      );
-    }
     if (scan.fitEft) addSection(body, "Fit \u2014 paste into Pyfa", scan.fitEft);
     const cargo = scan.cargoList || [];
     if (cargo.length) {
@@ -530,24 +509,10 @@ export function startRenderer(
     bumpRow.setAttribute("aria-label", "Bump hold for " + scanName(scan));
     open.append(bumpRow);
     const sell = isk(scan.valueSell);
-    const ehp = ehpFmt(scan.ehp);
-    if (sell || ehp) {
+    if (sell) {
       const row2 = element("div", "row2");
-      if (sell) appendSpan(row2, "val " + tier(scan.valueSell), sell);
-      if (ehp) appendSpan(row2, "ehp", ehp + " EHP" + (scan.ammo ? " vs " + scan.ammo : ""));
+      appendSpan(row2, "val " + tier(scan.valueSell), sell);
       open.append(row2);
-    }
-    const fleet = (scan.fleetAll || []).slice(0, 4);
-    if (fleet.length) {
-      const fleetRow = element("div", "fleet");
-      fleet.forEach((entry, index) => {
-        if (index) fleetRow.append(doc.createTextNode("  "));
-        fleetRow.append(
-          element("b", undefined, String(entry.ships)),
-          doc.createTextNode(" " + entry.name),
-        );
-      });
-      open.append(fleetRow);
     }
     const route = [
       scan.scanGate ? scan.scanGate + " gate" : null,
@@ -560,9 +525,7 @@ export function startRenderer(
       element(
         "div",
         "meta",
-        (scan.scout || "?") +
-          (scan.system ? " \u00B7 scanned in " + scan.system : "") +
-          (scan.sec ? " \u00B7 " + scan.sec + " " + (scan.prepped || "") : ""),
+        (scan.scout || "?") + (scan.system ? " \u00B7 scanned in " + scan.system : ""),
       ),
     );
     if (scan.notes) open.append(element("div", "notes", scan.notes));

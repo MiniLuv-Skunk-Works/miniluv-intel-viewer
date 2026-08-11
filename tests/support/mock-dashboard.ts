@@ -66,14 +66,35 @@ export class MockDashboard {
   sendHello(): void {
     this.send("hello", {
       name: "Phase 5 mock dashboard",
-      protocolVersion: 1,
+      protocolVersion: 2,
       capabilities: Object.values(PROTOCOL_CAPABILITIES),
       replay: { status: "snapshot" },
     });
   }
 
   sendScan(scan: Scan, revisionId = `revision-${scan.id}`): void {
-    this.send("scan", scan, revisionId);
+    this.send(
+      "scan",
+      {
+        analysisId: `analysis-${scan.id}`,
+        scout: "Mock Scout",
+        confidence: "full-fit",
+        hull: null,
+        system: null,
+        scanGate: null,
+        headGate: null,
+        pilot: null,
+        valueSell: null,
+        valueBuy: null,
+        valueSplit: null,
+        droppableSplit: null,
+        notes: null,
+        fitEft: null,
+        cargoList: [],
+        ...scan,
+      },
+      revisionId,
+    );
   }
 
   disconnectFeeds(): void {

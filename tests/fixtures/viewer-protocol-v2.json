@@ -1,0 +1,122 @@
+{
+  "protocolVersion": 2,
+  "capabilities": [
+    "scan-feed",
+    "bump-control",
+    "clipboard-relay",
+    "clipboard-vocabulary",
+    "scan-replay",
+    "scan-updates",
+    "scenario-calculation"
+  ],
+  "events": {
+    "hello": {
+      "name": "Fixture Operator",
+      "viewers": 2,
+      "protocolVersion": 2,
+      "capabilities": [
+        "scan-feed",
+        "bump-control",
+        "clipboard-relay",
+        "clipboard-vocabulary",
+        "scan-replay",
+        "scan-updates",
+        "scenario-calculation"
+      ],
+      "replay": { "status": "snapshot" }
+    },
+    "scan": {
+      "id": "fixture-scan-0001",
+      "analysisId": "00000000-0000-4000-8000-000000000001",
+      "at": 1754000000000,
+      "scout": "Fixture Scout",
+      "confidence": "full-fit",
+      "hull": "Obelisk",
+      "system": "Uedama",
+      "scanGate": "Sivala",
+      "headGate": "Haatomo",
+      "pilot": null,
+      "valueSell": 2000000000,
+      "valueBuy": 1800000000,
+      "valueSplit": 1900000000,
+      "droppableSplit": 900000000,
+      "notes": "Synthetic protocol fixture",
+      "fitEft": "[Obelisk, Fixture]\nDamage Control II",
+      "cargoList": [{ "name": "Tritanium", "qty": 5000 }]
+    },
+    "bump": {
+      "scanId": "fixture-scan-0001",
+      "at": 1754000005000,
+      "by": "Fixture Bumper",
+      "holdMs": 180000,
+      "remainingMs": 180000,
+      "count": 1
+    },
+    "bumpCleared": { "scanId": "fixture-scan-0001" }
+  },
+  "apiRequests": {
+    "scenarioCalculation": {
+      "scanIds": ["fixture-scan-0001", "fixture-scan-unavailable", "fixture-scan-expired"],
+      "scenario": {
+        "state": "prepped",
+        "securityStatus": "0.5",
+        "tankState": "active",
+        "implant": "none"
+      }
+    }
+  },
+  "apiResponses": {
+    "pair": { "code": "ABCD-2345", "expiresInSec": 300 },
+    "claim": { "token": "fixture-token-not-valid" },
+    "bump": {
+      "scanId": "fixture-scan-0001",
+      "at": 1754000005000,
+      "by": "Fixture Bumper",
+      "holdMs": 180000,
+      "remainingMs": 180000,
+      "count": 1
+    },
+    "bumpClear": { "cleared": true },
+    "clipboardRelay": { "delivered": 1 },
+    "vocabulary": {
+      "buildNumber": 3448696,
+      "words": ["damage", "control", "tritanium"]
+    },
+    "scenarioCalculation": {
+      "scenario": {
+        "state": "prepped",
+        "securityStatus": "0.5",
+        "tankState": "active",
+        "implant": "none"
+      },
+      "results": [
+        {
+          "scanId": "fixture-scan-0001",
+          "status": "ready",
+          "tank": {
+            "selectedProfile": "Void (kin/therm)",
+            "selectedEhp": 603301,
+            "ehpByProfile": {
+              "Void (kin/therm)": 603301,
+              "EM only": 710000,
+              "Explosive only": 680000
+            },
+            "overridden": false
+          },
+          "requirements": [{ "name": "Talos", "ships": 13 }]
+        },
+        { "scanId": "fixture-scan-unavailable", "status": "unavailable" },
+        { "scanId": "fixture-scan-expired", "status": "not-found" }
+      ]
+    }
+  },
+  "replay": {
+    "scanEventId": "fixture-revision-0001",
+    "lastEventIdHeader": "fixture-revision-0001",
+    "states": {
+      "snapshot": { "status": "snapshot" },
+      "resumed": { "status": "resumed" },
+      "cursorExpired": { "status": "cursor-expired" }
+    }
+  }
+}
