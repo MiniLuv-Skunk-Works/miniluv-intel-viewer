@@ -79,7 +79,7 @@ Authenticated bounded JSON requests provide vocabulary, bump control,
 clipboard relay, and request-scoped scenario calculations. The live feed is
 Server-Sent Events (SSE). Its `hello` event
 advertises the dashboard `protocolVersion`, capabilities, and replay state;
-subsequent events carry scans, bumps, and cleared bumps.
+subsequent events carry scans, scan removals, bumps, and cleared bumps.
 
 Version 2 recognizes these capabilities:
 
@@ -89,6 +89,7 @@ Version 2 recognizes these capabilities:
 - `clipboard-vocabulary`
 - `scan-replay`
 - `scan-updates`
+- `scan-removals`
 - `scenario-calculation`
 
 Unknown capability strings are ignored. A version-2 dashboard that omits a
@@ -122,13 +123,15 @@ bump controls. The viewer retains the latest validated, HTTP-header-safe
 revision cursor in memory for the current pairing and sends it as
 `Last-Event-ID` after a network interruption. Replayed and live events are
 deduplicated by revision ID, so a new revision of an existing stable scan is
-delivered as an in-place update. Bump events do not advance the scan cursor.
+delivered as an in-place update. Scan-removal tombstones also advance the
+cursor, so a deletion made during a network interruption is applied after
+reconnect. Bump events do not advance the scan cursor.
 
 If a cursor cannot be represented safely in an HTTP header, the viewer sends
 the last safe cursor and accepts a wider replay window; deduplication removes
 the overlap. A `hello.replay.status` of `cursor-expired` means the dashboard no
 longer retains the requested position. The viewer warns about the unrecoverable
-gap and accepts the complete retained window that follows.
+gap, clears its prior local list, and accepts the complete retained window that follows.
 
 The cursor is not persisted to disk. Starting the application or changing
 pairings requests the dashboard's normal retained snapshot. The feed connection

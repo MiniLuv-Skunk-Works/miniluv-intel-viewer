@@ -19,6 +19,7 @@ import {
   parsePairRequest,
   parsePairResult,
   parseScan,
+  parseScanRemovedEvent,
   parseScanId,
   parseScanRevisionId,
   parseScenarioCalculationOutcome,
@@ -277,6 +278,11 @@ ok(
   parseBumpClearedEvent({ scanId: "scan-1" })?.scanId === "scan-1" &&
     parseBumpClearedEvent({}) === null,
 );
+ok(
+  "scan-removed requires only a bounded scan id",
+  parseScanRemovedEvent({ scanId: "scan-1" })?.scanId === "scan-1" &&
+    parseScanRemovedEvent({ scanId: "scan-1", extra: true }) === null,
+);
 const hello = parseHelloEvent({
   name: "MiniLuv",
   protocolVersion: 2,
@@ -504,6 +510,10 @@ ok(
 ok(
   "fixture bump-cleared event parses",
   parseBumpClearedEvent(eventValue(fixture, ["bumpCleared", "bumpClearedEvent"])) !== null,
+);
+ok(
+  "fixture scan-removed event parses",
+  parseScanRemovedEvent(eventValue(fixture, ["scanRemoved"])) !== null,
 );
 ok(
   "fixture pairing response parses",

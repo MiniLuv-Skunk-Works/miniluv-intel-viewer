@@ -10,6 +10,7 @@ import type {
   OpacityLevel,
   PairResult,
   Scan,
+  ScanRemovedEvent,
   ViewerApi,
   ViewerState,
   UserPreferences,
@@ -43,6 +44,7 @@ class FakeApi implements ViewerApi {
     ((request: ViewerScenarioCalculationRequest) => Promise<ScenarioCalculationOutcome>) | null =
     null;
   private scanListener: (scan: Scan) => void = () => undefined;
+  private scanRemovedListener: (event: ScanRemovedEvent) => void = () => undefined;
   private statusListener: (status: ConnectionStatus) => void = () => undefined;
   private clearListener: () => void = () => undefined;
   private repairListener: () => void = () => undefined;
@@ -128,6 +130,9 @@ class FakeApi implements ViewerApi {
   onScan(listener: (scan: Scan) => void): void {
     this.scanListener = listener;
   }
+  onScanRemoved(listener: (event: ScanRemovedEvent) => void): void {
+    this.scanRemovedListener = listener;
+  }
   onStatus(listener: (status: ConnectionStatus) => void): void {
     this.statusListener = listener;
   }
@@ -157,6 +162,9 @@ class FakeApi implements ViewerApi {
   }
   emitScan(scan: Scan): void {
     this.scanListener(scan);
+  }
+  emitScanRemoved(event: ScanRemovedEvent): void {
+    this.scanRemovedListener(event);
   }
   emitStatus(status: ConnectionStatus): void {
     this.statusListener(status);
@@ -429,6 +437,12 @@ async function run(): Promise<void> {
   );
   filterQuery.value = "";
   filterQuery.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
+  api.emitScanRemoved({ scanId: targetId });
+  ok(
+    "a dashboard deletion removes only the matching scan",
+    articleFor("Filtered Out Hull") === null &&
+      document.querySelectorAll(".scan").length === hostileIds.length - 1,
+  );
   ok(
     "server IDs never become selectors or DOM IDs",
     !source.includes("CSS.escape") && !source.includes("data-bump") && !source.includes("data-id"),

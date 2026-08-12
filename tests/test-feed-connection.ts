@@ -276,6 +276,7 @@ secondReplayResponse?.emit(
   'event: scan\nid: revision-1\ndata: {"id":"scan-1","at":1,"hull":"Original"}\n\n' +
     'event: scan\nid: revision-2\ndata: {"id":"scan-1","at":2,"hull":"Edited"}\n\n' +
     'event: scan\nid: revision-3\ndata: {"id":"scan-2","at":3}\n\n' +
+    'event: scanRemoved\nid: revision-4\ndata: {"scanId":"scan-1"}\n\n' +
     'event: scan\nid: Unicode Ω\ndata: {"id":"scan-3","at":4}\n\n' +
     'event: scan\nid: Unicode Ω\ndata: {"id":"scan-3","at":4}\n\n' +
     'event: scan\nid: malformed\ndata: {"id":"malformed"}\n\n',
@@ -295,7 +296,7 @@ ok(
   "rejected or untransmittable IDs cannot advance the replay cursor",
   (replayTransport.attempts[2]?.options.headers as Record<string, string> | undefined)?.[
     "Last-Event-ID"
-  ] === "revision-3",
+  ] === "revision-4",
 );
 replayManager.stop();
 

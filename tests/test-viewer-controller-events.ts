@@ -19,6 +19,7 @@ describe("viewer scan revisions", () => {
   it("accepts independent revision IDs and alerts only for the first stable scan", async () => {
     let callbacks: FeedConnectionCallbacks | undefined;
     const relayedScans: Scan[] = [];
+    const removedScanIds: string[] = [];
     const alertedScans: Scan[] = [];
     const replayModes: boolean[] = [];
 
@@ -62,6 +63,9 @@ describe("viewer scan revisions", () => {
       allowInsecureLocalhost: false,
       relay: <K extends keyof IpcEventContract>(channel: K, payload: IpcEventContract[K]) => {
         if (channel === "scan") relayedScans.push(payload as Scan);
+        if (channel === "scanRemoved") {
+          removedScanIds.push((payload as { scanId: string }).scanId);
+        }
       },
       createFeedConnection: (createdCallbacks) => {
         callbacks = createdCallbacks;
@@ -113,6 +117,14 @@ describe("viewer scan revisions", () => {
       true,
     );
     assert.equal(
+      callbacks.onEvent({
+        event: "scanRemoved",
+        id: "revision-3",
+        data: JSON.stringify({ scanId: "stable-scan" }),
+      }),
+      true,
+    );
+    assert.equal(
       callbacks.onEvent({ event: "scan", id: "bad\nrevision", data: JSON.stringify(edited) }),
       false,
     );
@@ -126,6 +138,7 @@ describe("viewer scan revisions", () => {
       alertedScans.map((scan) => scan.hull),
       ["Obelisk"],
     );
+    assert.deepEqual(removedScanIds, ["stable-scan"]);
     callbacks.onEvent({
       event: "hello",
       data: JSON.stringify({

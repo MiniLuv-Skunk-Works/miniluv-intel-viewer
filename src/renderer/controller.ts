@@ -1269,6 +1269,18 @@ export function startRenderer(
       requestCalculations([scan.id]);
     }
   });
+  api.onScanRemoved((event) => {
+    const existingIndex = scans.findIndex((scan) => scan.id === event.scanId);
+    if (existingIndex === -1) return;
+    const detailWasOpen = activeOverlay === "detail" && detailScanId === event.scanId;
+    if (detailWasOpen) closeDetail(false);
+    scans.splice(existingIndex, 1);
+    calculations.delete(event.scanId);
+    calculationEpochs.delete(event.scanId);
+    delete bumps[event.scanId];
+    render();
+    if (detailWasOpen) $("list").focus();
+  });
   api.onStatus(setStatus);
   api.onUnpaired(() => {
     paired = false;
