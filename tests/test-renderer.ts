@@ -104,6 +104,10 @@ class FakeApi implements ViewerApi {
           },
           requirements: [
             { name: "Talos" as const, ships: request.scenario.state === "prepped" ? 12 : 18 },
+            { name: "T2 Cat" as const, ships: 12 },
+            { name: "T1 Cat" as const, ships: 27 },
+            { name: "Hound" as const, ships: 8 },
+            { name: "Purifier" as const, ships: 8 },
           ],
         })),
       },
@@ -279,7 +283,16 @@ async function run(): Promise<void> {
   await flush();
   console.log("\n=== universal scenario replay and request generations ===");
   api.emitStatus({ state: "replaying", protocolVersion: 2 });
-  api.emitScan(scan("scenario-a", "Scenario Hull A"));
+  api.emitScan({
+    ...scan("scenario-a", "Scenario Hull A"),
+    system: "Urlen",
+    scanGate: "Kusommon",
+    headGate: "Perimeter",
+    scout: "Joe",
+    valueSplit: 26_460_000_000,
+    droppableSplit: 25_820_000_000,
+    notes: "YES",
+  });
   api.emitScan(scan("scenario-b", "Scenario Hull B"));
   ok("replayed scans do not request individually", api.calculationCalls.length === 0);
   api.emitStatus({ state: "live", protocolVersion: 2 });
@@ -291,11 +304,18 @@ async function run(): Promise<void> {
     api.calculationCalls,
   );
   ok(
-    "cards render server-calculated EHP, profile, fleet, and universal context",
-    articleFor("Scenario Hull A")?.textContent?.includes("600k EHP vs Void") &&
+    "cards render the consolidated split, EHP, complete fleet, route, scout, and notes",
+    articleFor("Scenario Hull A")?.querySelector(".ehp")?.textContent === "600k EHP \u00B7 Void" &&
+      articleFor("Scenario Hull A")?.textContent?.includes("25.82B split") &&
+      !articleFor("Scenario Hull A")?.textContent?.includes("26.46B split") &&
       articleFor("Scenario Hull A")?.textContent?.includes("12 Talos") &&
-      articleFor("Scenario Hull A")?.textContent?.includes("Active tank") &&
-      articleFor("Scenario Hull A")?.textContent?.includes("Prepped"),
+      articleFor("Scenario Hull A")?.textContent?.includes("8 Purifier") &&
+      articleFor("Scenario Hull A")?.textContent?.includes(
+        "Urlen @ Kusommon \u2192 Perimeter \u00B7 Joe",
+      ) &&
+      articleFor("Scenario Hull A")?.textContent?.includes("YES") &&
+      !articleFor("Scenario Hull A")?.textContent?.includes("Active tank") &&
+      !articleFor("Scenario Hull A")?.textContent?.includes("Prepped"),
   );
   api.emitScan({ ...scan("scenario-a", "Scenario Hull A"), notes: "revised" });
   await flush();
@@ -314,6 +334,7 @@ async function run(): Promise<void> {
     api.calculationCalls.length === 3 &&
       api.calculationCalls[2]?.scanIds.length === 2 &&
       document.getElementById("detailBody")?.textContent?.includes("900,000 EHP") &&
+      document.getElementById("detailBody")?.textContent?.includes("Void (kin/therm)") &&
       document.getElementById("detailBody")?.textContent?.includes("Overheated tank"),
   );
   const callsBeforeOtherControls = api.calculationCalls.length;

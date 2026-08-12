@@ -178,6 +178,9 @@ export function startRenderer(
     if (n == null || isNaN(n)) return null;
     return n >= 1e6 ? (n / 1e6).toFixed(2) + "m" : (n / 1e3).toFixed(0) + "k";
   }
+  function compactProfile(profile: string): string {
+    return profile.replace(/\s*\([^)]*\)\s*$/, "").trim() || profile;
+  }
   function sameScenario(left: CombatScenario, right: CombatScenario): boolean {
     return (
       left.state === right.state &&
@@ -198,9 +201,6 @@ export function startRenderer(
   }
   function fleetContext(scenario = preferences.combatScenario): string {
     return titleCase(scenario.state) + " \u00B7 " + scenario.securityStatus + " security";
-  }
-  function scenarioContext(scenario = preferences.combatScenario): string {
-    return tankContext(scenario) + " \u00B7 " + fleetContext(scenario);
   }
   function currentCalculation(id: string): CalculationView | undefined {
     const calculation = calculations.get(id);
@@ -758,38 +758,38 @@ export function startRenderer(
     bumpRow.setAttribute("aria-valuemax", "100");
     bumpRow.setAttribute("aria-label", "Bump hold for " + scanName(scan));
     open.append(bumpRow);
-    const sell = isk(scan.valueSell);
+    const split = isk(scan.droppableSplit);
     const calculation = currentCalculation(scan.id);
     const ready = calculation?.result?.status === "ready" ? calculation.result : undefined;
     const ehp = ready ? ehpFmt(ready.tank.selectedEhp) : null;
-    if (sell || ehp) {
+    if (split || ehp) {
       const row2 = element("div", "row2");
-      if (sell) appendSpan(row2, "val " + tier(scan.valueSell), sell);
+      if (split) appendSpan(row2, "val " + tier(scan.droppableSplit), split + " split");
       if (ehp && ready) {
         appendSpan(
           row2,
           "ehp",
           ehp +
-            " EHP vs " +
-            ready.tank.selectedProfile +
+            " EHP \u00B7 " +
+            compactProfile(ready.tank.selectedProfile) +
             (ready.tank.overridden ? " \u00B7 override" : ""),
         );
       }
       open.append(row2);
     }
-    const fleet = ready?.requirements.slice(0, 4) ?? [];
+    const fleet = ready?.requirements ?? [];
     if (fleet.length) {
       const fleetRow = element("div", "fleet");
-      fleet.forEach((entry, index) => {
-        if (index) fleetRow.append(doc.createTextNode("  "));
-        fleetRow.append(
+      fleet.forEach((entry) => {
+        const requirement = element("span", "fleetRequirement");
+        requirement.append(
           element("b", undefined, String(entry.ships)),
           doc.createTextNode(" " + entry.name),
         );
+        fleetRow.append(requirement);
       });
       open.append(fleetRow);
     }
-    open.append(element("div", "calculationContext", scenarioContext()));
     if (!ready || calculation?.phase === "stale") {
       const message =
         calculation?.message ??
@@ -806,19 +806,12 @@ export function startRenderer(
         ),
       );
     }
-    const route = [
-      scan.scanGate ? scan.scanGate + " gate" : null,
-      scan.headGate ? "\u2192 " + scan.headGate : null,
-    ]
+    const route = [scan.scanGate || null, scan.headGate ? "\u2192 " + scan.headGate : null]
       .filter(Boolean)
-      .join("  ");
-    if (route) open.append(element("div", "meta", route));
+      .join(" ");
+    const location = [scan.system || null, route ? "@ " + route : null].filter(Boolean).join(" ");
     open.append(
-      element(
-        "div",
-        "meta",
-        (scan.scout || "?") + (scan.system ? " \u00B7 scanned in " + scan.system : ""),
-      ),
+      element("div", "meta", [location, scan.scout || "?"].filter(Boolean).join(" \u00B7 ")),
     );
     if (scan.notes) open.append(element("div", "notes", scan.notes));
     open.addEventListener("click", () => openDetail(scan.id));

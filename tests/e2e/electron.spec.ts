@@ -77,7 +77,7 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     });
     await waitForRequest(dashboard, "/api/viewer/scenario-calculations");
     await expect(page.locator(".hull").first()).toHaveText(hostile);
-    await expect(page.locator(".scan").first()).toContainText("600k EHP vs Void");
+    await expect(page.locator(".scan").first()).toContainText("600k EHP \u00B7 Void");
     await expect(page.locator(".scan").first()).toContainText("12 Talos");
     const calculationRequestsBeforeToggle = dashboard.requests.filter(
       (request) => request.path === "/api/viewer/scenario-calculations",
@@ -88,7 +88,7 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
       "/api/viewer/scenario-calculations",
       calculationRequestsBeforeToggle + 1,
     );
-    await expect(page.locator(".scan").first()).toContainText("900k EHP vs Void");
+    await expect(page.locator(".scan").first()).toContainText("900k EHP \u00B7 Void");
     await page.locator(".scanOpen").first().click();
     await expect(page.locator("#detailBody")).toContainText("900,000 EHP");
     await expect(page.locator("#detailBody")).toContainText("Overheated tank");
