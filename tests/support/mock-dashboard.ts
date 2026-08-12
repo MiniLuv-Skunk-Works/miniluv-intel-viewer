@@ -66,14 +66,35 @@ export class MockDashboard {
   sendHello(): void {
     this.send("hello", {
       name: "Phase 5 mock dashboard",
-      protocolVersion: 1,
+      protocolVersion: 2,
       capabilities: Object.values(PROTOCOL_CAPABILITIES),
       replay: { status: "snapshot" },
     });
   }
 
   sendScan(scan: Scan, revisionId = `revision-${scan.id}`): void {
-    this.send("scan", scan, revisionId);
+    this.send(
+      "scan",
+      {
+        analysisId: `analysis-${scan.id}`,
+        scout: "Mock Scout",
+        confidence: "full-fit",
+        hull: null,
+        system: null,
+        scanGate: null,
+        headGate: null,
+        pilot: null,
+        valueSell: null,
+        valueBuy: null,
+        valueSplit: null,
+        droppableSplit: null,
+        notes: null,
+        fitEft: null,
+        cargoList: [],
+        ...scan,
+      },
+      revisionId,
+    );
   }
 
   disconnectFeeds(): void {
@@ -134,6 +155,47 @@ export class MockDashboard {
       const scanId =
         body && typeof body === "object" && "scanId" in body ? String(body.scanId) : "unknown";
       this.json(response, 200, { scanId, by: "tester", count: 1, holdMs: 180_000 });
+      return;
+    }
+    if (path === "/api/viewer/scenario-calculations" && request.method === "POST") {
+      const payload = body as {
+        scanIds?: unknown;
+        scenario?: {
+          state?: string;
+          securityStatus?: string;
+          tankState?: string;
+          implant?: string;
+        };
+      };
+      const scanIds = Array.isArray(payload.scanIds)
+        ? payload.scanIds.filter((value): value is string => typeof value === "string")
+        : [];
+      const scenario = payload.scenario ?? {};
+      const selectedEhp =
+        scenario.tankState === "overheated"
+          ? 900_000
+          : scenario.tankState === "passive"
+            ? 450_000
+            : 600_000;
+      this.json(response, 200, {
+        scenario,
+        results: scanIds.map((scanId) => ({
+          scanId,
+          status: "ready",
+          tank: {
+            selectedProfile: "Void (kin/therm)",
+            selectedEhp,
+            ehpByProfile: { "Void (kin/therm)": selectedEhp },
+            overridden: false,
+          },
+          requirements: [
+            {
+              name: "Talos",
+              ships: scenario.state === "unprepped" ? 18 : 12,
+            },
+          ],
+        })),
+      });
       return;
     }
     if (path === "/api/feed" && request.method === "GET") {

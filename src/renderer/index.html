@@ -135,7 +135,8 @@
         flex: 1;
       }
       button,
-      input {
+      input,
+      select {
         font: inherit;
       }
       header button {
@@ -162,6 +163,7 @@
       }
       button:focus-visible,
       input:focus-visible,
+      select:focus-visible,
       [role="button"]:focus-visible,
       [tabindex]:focus-visible {
         outline: 3px solid var(--focus);
@@ -178,6 +180,83 @@
         clip: rect(0, 0, 0, 0);
         white-space: nowrap;
         border: 0;
+      }
+      #scenarioControls {
+        margin: 0;
+        padding: 5px 6px 6px;
+        border: 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(0, 0, 0, 0.22);
+      }
+      .scenarioGrid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 5px;
+      }
+      .scenarioField {
+        min-width: 0;
+      }
+      .scenarioField > span {
+        display: block;
+        margin: 0 0 2px 1px;
+        color: var(--dim);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.35px;
+        line-height: 1;
+        text-transform: uppercase;
+      }
+      .scenarioField select {
+        width: 100%;
+        min-width: 0;
+        height: 25px;
+        padding: 2px 3px;
+        color: var(--text);
+        background: #202226;
+        border: 1px solid var(--control-border);
+        border-radius: 4px;
+        font-size: 10px;
+      }
+      .scenarioSegment {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+      .scenarioSegment input {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .scenarioSegment label {
+        height: 25px;
+        padding: 4px 2px;
+        color: var(--dim);
+        background: rgba(0, 0, 0, 0.32);
+        border: 1px solid var(--control-border);
+        font-size: 10px;
+        line-height: 15px;
+        text-align: center;
+        cursor: pointer;
+      }
+      .scenarioSegment label:first-of-type {
+        border-radius: 4px 0 0 4px;
+      }
+      .scenarioSegment label:last-of-type {
+        margin-left: -1px;
+        border-radius: 0 4px 4px 0;
+      }
+      .scenarioSegment input:checked + label {
+        position: relative;
+        z-index: 1;
+        color: #fff;
+        background: var(--green-fill);
+      }
+      .scenarioSegment input:focus-visible + label {
+        position: relative;
+        z-index: 2;
+        outline: 3px solid var(--focus);
+        outline-offset: 2px;
       }
       #filterPanel {
         display: grid;
@@ -307,6 +386,18 @@
       .fleet b {
         color: var(--text);
         font-weight: 700;
+      }
+      .calculationContext,
+      .calculationState {
+        margin-top: 3px;
+        color: var(--dim);
+        font-size: 10px;
+      }
+      .calculationState {
+        color: var(--amber);
+      }
+      .calculationState.stale {
+        color: var(--red);
       }
       .meta {
         margin-top: 3px;
@@ -698,6 +789,62 @@
           &times;
         </button>
       </header>
+      <fieldset
+        id="scenarioControls"
+        aria-label="Tank and fleet calculations for every scan"
+      >
+        <legend class="status-visually-hidden">
+          Tank and fleet calculations for every scan
+        </legend>
+        <div class="scenarioGrid">
+          <div class="scenarioField">
+            <span>state</span>
+            <div class="scenarioSegment">
+              <input
+                id="scenarioPrepped"
+                name="scenarioState"
+                type="radio"
+                value="prepped"
+              />
+              <label for="scenarioPrepped" title="Prepped fleet">prep</label>
+              <input
+                id="scenarioUnprepped"
+                name="scenarioState"
+                type="radio"
+                value="unprepped"
+              />
+              <label for="scenarioUnprepped" title="Unprepped fleet">raw</label>
+            </div>
+          </div>
+          <label class="scenarioField">
+            <span>security</span>
+            <select id="scenarioSecurity" aria-label="Security status for every scan">
+              <option value="0.5">0.5</option>
+              <option value="0.6">0.6</option>
+              <option value="0.7">0.7</option>
+              <option value="0.8">0.8</option>
+              <option value="0.9">0.9</option>
+              <option value="1">1.0</option>
+            </select>
+          </label>
+          <label class="scenarioField">
+            <span>tank</span>
+            <select id="scenarioTank" aria-label="Tank state for every scan">
+              <option value="passive">passive</option>
+              <option value="active">active</option>
+              <option value="overheated">heated</option>
+            </select>
+          </label>
+          <label class="scenarioField">
+            <span>implant</span>
+            <select id="scenarioImplant" aria-label="Implant choice for every scan">
+              <option value="none">none</option>
+              <option value="amulet">Amulet</option>
+              <option value="nirvana">Nirvana</option>
+            </select>
+          </label>
+        </div>
+      </fieldset>
       <div
         id="liveStatus"
         class="status-visually-hidden"

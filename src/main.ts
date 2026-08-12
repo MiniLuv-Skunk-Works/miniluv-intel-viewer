@@ -119,6 +119,7 @@ const disposeIpc = registerIpcHandlers({
     clipboard: (on) => controller.clipboard(on),
     preferences: () => controller.preferences(),
     savePreferences: (preferences) => controller.savePreferences(preferences),
+    calculateScenario: (request) => controller.calculateScenario(request),
     diagnostics: () => controller.diagnostics(),
     checkUpdate: () => controller.checkUpdate(),
     openUpdate: async () => {

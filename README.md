@@ -43,12 +43,17 @@ verification commands.
 4. New scans appear as they are posted.
 
 The viewer remembers its dashboard address, encrypted pairing credential,
-window position, and opacity under `%APPDATA%\milf-viewer`. Use **Re-pair** in
-viewer settings or the tray menu to connect it to another dashboard.
+window position, opacity, feed filters, alert rules, and combat scenario under
+`%APPDATA%\milf-viewer`. Use **Re-pair** in viewer settings or the tray menu to
+connect it to another dashboard.
 
 ## Features
 
 - Live scan feed with hull, pilot, value, tank, route, fleet, and notes
+- One universal scenario for every scan: prepped state, security status, tank
+  state, and one mutually exclusive implant choice
+- Server-authoritative EHP and fleet calculations requested in bounded batches,
+  with unavailable or expired results shown explicitly
 - Expandable fit and cargo details
 - Always-on-top, resizable Windows overlay with three opacity levels
 - Per-scan bump controls and locally counted countdown timers
@@ -74,6 +79,11 @@ Desktop alerts are also **off by default**. Alert matching happens locally and
 is independent of visible-feed filters. Notifications use generic lock-screen
 text unless **Show intel details on the lock screen** is explicitly enabled.
 Retained and replayed scans never produce desktop alerts.
+
+Combat-scenario choices are stored locally as non-secret preferences. Scan feed
+events contain shared scan facts only; the viewer sends its current scenario to
+the paired dashboard when requesting calculations, and the dashboard does not
+persist that viewer-specific selection.
 
 The renderer is sandboxed, has no Node.js integration, and communicates through
 a narrow typed preload bridge. Pairing credentials are encrypted with Electron
@@ -133,9 +143,9 @@ validated viewer operations to the sandboxed renderer. The viewer pairs over
 bounded JSON requests and consumes a capability-negotiated SSE feed with replay
 cursor and duplicate suppression.
 
-The viewer supports dashboard protocol version 1, remains usable with legacy
-dashboards, disables unsafe writes for newer protocol versions, and has no
-runtime dependency on dashboard source packages. See
+The viewer supports dashboard protocol version 2 as a clean break. It rejects
+legacy, version-1, and future protocol feeds, and has no runtime dependency on
+dashboard source packages. See
 [ARCHITECTURE.md](docs/ARCHITECTURE.md) for component responsibilities, trust
 boundaries, data flow, protocol capabilities, replay behavior, and compatibility
 rules.

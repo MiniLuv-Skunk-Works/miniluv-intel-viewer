@@ -1,6 +1,8 @@
 import {
   defaultUserPreferences,
+  parseCombatScenario,
   type ActiveBump,
+  type CombatScenario,
   type ConnectionState,
   type ConnectionStatus,
   type DiagnosticsSnapshot,
@@ -9,6 +11,7 @@ import {
   type ViewerApi,
   type UserPreferences,
   type UpdateInfo,
+  type ViewerScenarioCalculationResult,
 } from "../contracts";
 import { scanMatchesFilter } from "../alerting";
 
@@ -85,6 +88,11 @@ interface Elements {
   diagnosticErrors: HTMLElement;
   updateSummary: HTMLElement;
   releaseNotes: HTMLElement;
+  scenarioPrepped: HTMLInputElement;
+  scenarioUnprepped: HTMLInputElement;
+  scenarioSecurity: HTMLSelectElement;
+  scenarioTank: HTMLSelectElement;
+  scenarioImplant: HTMLSelectElement;
 }
 
 interface ScanElements {
@@ -97,6 +105,16 @@ interface ScanElements {
 }
 
 type Overlay = "detail" | "pair" | "settings" | "diagnostics" | null;
+type CalculationPhase = "pending" | "ready" | "stale" | "unavailable";
+
+interface CalculationView {
+  scenario: CombatScenario;
+  phase: CalculationPhase;
+  result?: ViewerScenarioCalculationResult;
+  message?: string;
+}
+
+const MAX_RETAINED_SCANS = 25;
 
 export function startRenderer(
   api: ViewerApi,
@@ -142,6 +160,10 @@ export function startRenderer(
   let bumpErrTimer: number | null = null;
   let noticeTimer: number | null = null;
   let preferences: UserPreferences = defaultUserPreferences();
+  const calculations = new Map<string, CalculationView>();
+  const calculationEpochs = new Map<string, number>();
+  let calculationGeneration = 0;
+  let calculationEpoch = 0;
   let currentStatus: ConnectionStatus = { state: "connecting" };
   let currentUpdate: UpdateInfo = { status: "unknown", currentVersion: "unknown" };
   let visibleNotice: string | null = null;
@@ -155,6 +177,36 @@ export function startRenderer(
   function ehpFmt(n: number | null | undefined): string | null {
     if (n == null || isNaN(n)) return null;
     return n >= 1e6 ? (n / 1e6).toFixed(2) + "m" : (n / 1e3).toFixed(0) + "k";
+  }
+  function sameScenario(left: CombatScenario, right: CombatScenario): boolean {
+    return (
+      left.state === right.state &&
+      left.securityStatus === right.securityStatus &&
+      left.tankState === right.tankState &&
+      left.implant === right.implant
+    );
+  }
+  function titleCase(value: string): string {
+    return value.charAt(0).toUpperCase() + value.slice(1);
+  }
+  function tankContext(scenario = preferences.combatScenario): string {
+    return (
+      titleCase(scenario.tankState) +
+      " tank \u00B7 " +
+      (scenario.implant === "none" ? "no implants" : titleCase(scenario.implant))
+    );
+  }
+  function fleetContext(scenario = preferences.combatScenario): string {
+    return titleCase(scenario.state) + " \u00B7 " + scenario.securityStatus + " security";
+  }
+  function scenarioContext(scenario = preferences.combatScenario): string {
+    return tankContext(scenario) + " \u00B7 " + fleetContext(scenario);
+  }
+  function currentCalculation(id: string): CalculationView | undefined {
+    const calculation = calculations.get(id);
+    return calculation && sameScenario(calculation.scenario, preferences.combatScenario)
+      ? calculation
+      : undefined;
   }
   function tier(v: number | null | undefined): string {
     if (v == null) return "t1";
@@ -237,21 +289,51 @@ export function startRenderer(
         .join("  /  "),
     );
     addKv(body, "Droppable", isk(scan.droppableSplit) ? isk(scan.droppableSplit) + " split" : "");
-    addKv(
-      body,
-      "Tank",
-      ehpFmt(scan.ehp) ? ehpFmt(scan.ehp) + " EHP" + (scan.ammo ? " vs " + scan.ammo : "") : "",
-    );
-    const fleet = scan.fleetAll || [];
-    if (fleet.length) {
-      const title =
-        "Fleet needed" + (scan.sec ? " \u2014 " + scan.sec + ", " + (scan.prepped || "") : "");
-      addSection(
+    const calculation = currentCalculation(scan.id);
+    const ready = calculation?.result?.status === "ready" ? calculation.result : undefined;
+    body.append(element("h3", undefined, "Tank \u2014 " + tankContext()));
+    if (ready) {
+      addKv(
         body,
-        title,
-        fleet
-          .map((entry) => String(entry.name).padEnd(9) + String(entry.ships).padStart(4))
-          .join("\n"),
+        ready.tank.selectedProfile,
+        Math.round(ready.tank.selectedEhp).toLocaleString() +
+          " EHP" +
+          (ready.tank.overridden ? " \u00B7 manual override" : "") +
+          (calculation?.phase === "stale" ? " \u00B7 stale" : ""),
+      );
+    } else {
+      body.append(
+        element(
+          "div",
+          "kv missing",
+          calculation?.message ??
+            (calculation?.phase === "pending"
+              ? "Refreshing calculation\u2026"
+              : "Calculation unavailable."),
+        ),
+      );
+    }
+    body.append(element("h3", undefined, "Fleet needed \u2014 " + fleetContext()));
+    if (ready) {
+      body.append(
+        element(
+          "pre",
+          undefined,
+          ready.requirements
+            .map((entry) => String(entry.name).padEnd(9) + String(entry.ships).padStart(4))
+            .join("\n"),
+        ),
+      );
+    } else {
+      body.append(
+        element(
+          "div",
+          "kv missing",
+          calculation?.message ??
+            (calculation?.phase === "pending"
+              ? "Refreshing calculation\u2026"
+              : "Calculation unavailable."),
+        ),
       );
     }
     if (scan.fitEft) addSection(body, "Fit \u2014 paste into Pyfa", scan.fitEft);
@@ -504,6 +586,153 @@ export function startRenderer(
     if (existing) existing.push(rendered);
     else scanElements.set(id, [rendered]);
   }
+  function refreshOpenDetail(): void {
+    if (activeOverlay === "detail" && detailScanId) openDetail(detailScanId, false);
+  }
+  function repaintCalculations(): void {
+    render();
+    refreshOpenDetail();
+  }
+  function requestCalculations(scanIds: string[]): void {
+    const retainedIds = new Set(scans.map((scan) => scan.id));
+    const ids = [...new Set(scanIds)]
+      .filter((id) => retainedIds.has(id))
+      .slice(0, MAX_RETAINED_SCANS);
+    if (!ids.length) return;
+    const scenario = { ...preferences.combatScenario };
+    const generation = calculationGeneration;
+    calculationEpoch += 1;
+    const epoch = calculationEpoch;
+    ids.forEach((id) => {
+      calculationEpochs.set(id, epoch);
+      const previous = currentCalculation(id);
+      calculations.set(id, {
+        scenario,
+        phase: previous?.result?.status === "ready" ? "stale" : "pending",
+        ...(previous?.result?.status === "ready" ? { result: previous.result } : {}),
+        ...(previous?.result?.status === "ready"
+          ? { message: "Refreshing stale tank and fleet values\u2026" }
+          : {}),
+      });
+    });
+    repaintCalculations();
+    void api
+      .calculateScenario({ scanIds: ids, scenario })
+      .then((outcome) => {
+        if (
+          generation !== calculationGeneration ||
+          !sameScenario(scenario, preferences.combatScenario)
+        ) {
+          return;
+        }
+        if (!outcome.ok) {
+          ids.forEach((id) => {
+            if (calculationEpochs.get(id) !== epoch) return;
+            const previous = currentCalculation(id);
+            calculations.set(id, {
+              scenario,
+              phase: previous?.result?.status === "ready" ? "stale" : "unavailable",
+              ...(previous?.result?.status === "ready" ? { result: previous.result } : {}),
+              message:
+                outcome.reason === "rate-limited"
+                  ? "Calculations rate-limited; retrying after reconnect."
+                  : outcome.message,
+            });
+          });
+          repaintCalculations();
+          return;
+        }
+        outcome.response.results.forEach((result) => {
+          if (calculationEpochs.get(result.scanId) !== epoch) return;
+          calculations.set(
+            result.scanId,
+            result.status === "ready"
+              ? { scenario, phase: "ready", result }
+              : {
+                  scenario,
+                  phase: "unavailable",
+                  result,
+                  message:
+                    result.status === "not-found"
+                      ? "This retained scan has expired."
+                      : "Tank context is unavailable for this scan.",
+                },
+          );
+        });
+        repaintCalculations();
+      })
+      .catch(() => {
+        if (
+          generation !== calculationGeneration ||
+          !sameScenario(scenario, preferences.combatScenario)
+        ) {
+          return;
+        }
+        ids.forEach((id) => {
+          if (calculationEpochs.get(id) !== epoch) return;
+          calculations.set(id, {
+            scenario,
+            phase: "unavailable",
+            message: "Calculation request failed.",
+          });
+        });
+        repaintCalculations();
+      });
+  }
+  function markCalculationsStale(): void {
+    let changed = false;
+    calculations.forEach((calculation, id) => {
+      if (
+        calculation.phase === "ready" &&
+        calculation.result?.status === "ready" &&
+        sameScenario(calculation.scenario, preferences.combatScenario)
+      ) {
+        calculations.set(id, {
+          ...calculation,
+          phase: "stale",
+          message: "Tank and fleet values are stale while disconnected.",
+        });
+        changed = true;
+      }
+    });
+    if (changed) repaintCalculations();
+  }
+  function paintScenarioControls(): void {
+    const scenario = preferences.combatScenario;
+    $("scenarioPrepped").checked = scenario.state === "prepped";
+    $("scenarioUnprepped").checked = scenario.state === "unprepped";
+    $("scenarioSecurity").value = scenario.securityStatus;
+    $("scenarioTank").value = scenario.tankState;
+    $("scenarioImplant").value = scenario.implant;
+  }
+  function applyScenario(scenario: CombatScenario, persist: boolean): void {
+    const changed = !sameScenario(preferences.combatScenario, scenario);
+    preferences = { ...preferences, combatScenario: { ...scenario } };
+    paintScenarioControls();
+    if (!changed) return;
+    calculationGeneration += 1;
+    calculationEpochs.clear();
+    calculations.clear();
+    repaintCalculations();
+    if (persist) void api.savePreferences(preferences);
+    requestCalculations(scans.map((scan) => scan.id));
+  }
+  function scenarioChanged(): void {
+    const scenario = parseCombatScenario({
+      state: $("scenarioPrepped").checked ? "prepped" : "unprepped",
+      securityStatus: $("scenarioSecurity").value,
+      tankState: $("scenarioTank").value,
+      implant: $("scenarioImplant").value,
+    });
+    if (scenario) applyScenario(scenario, true);
+  }
+  $("scenarioPrepped").addEventListener("change", scenarioChanged);
+  $("scenarioUnprepped").addEventListener("change", scenarioChanged);
+  $("scenarioSecurity").addEventListener("change", scenarioChanged);
+  $("scenarioTank").addEventListener("change", scenarioChanged);
+  $("scenarioImplant").addEventListener("change", scenarioChanged);
+  paintScenarioControls();
+
   function createScan(scan: Scan): HTMLElement {
     const article = element("article", "scan");
     const open = element("div", "scanOpen");
@@ -530,14 +759,25 @@ export function startRenderer(
     bumpRow.setAttribute("aria-label", "Bump hold for " + scanName(scan));
     open.append(bumpRow);
     const sell = isk(scan.valueSell);
-    const ehp = ehpFmt(scan.ehp);
+    const calculation = currentCalculation(scan.id);
+    const ready = calculation?.result?.status === "ready" ? calculation.result : undefined;
+    const ehp = ready ? ehpFmt(ready.tank.selectedEhp) : null;
     if (sell || ehp) {
       const row2 = element("div", "row2");
       if (sell) appendSpan(row2, "val " + tier(scan.valueSell), sell);
-      if (ehp) appendSpan(row2, "ehp", ehp + " EHP" + (scan.ammo ? " vs " + scan.ammo : ""));
+      if (ehp && ready) {
+        appendSpan(
+          row2,
+          "ehp",
+          ehp +
+            " EHP vs " +
+            ready.tank.selectedProfile +
+            (ready.tank.overridden ? " \u00B7 override" : ""),
+        );
+      }
       open.append(row2);
     }
-    const fleet = (scan.fleetAll || []).slice(0, 4);
+    const fleet = ready?.requirements.slice(0, 4) ?? [];
     if (fleet.length) {
       const fleetRow = element("div", "fleet");
       fleet.forEach((entry, index) => {
@@ -548,6 +788,23 @@ export function startRenderer(
         );
       });
       open.append(fleetRow);
+    }
+    open.append(element("div", "calculationContext", scenarioContext()));
+    if (!ready || calculation?.phase === "stale") {
+      const message =
+        calculation?.message ??
+        (calculation?.phase === "pending"
+          ? "Refreshing tank and fleet\u2026"
+          : calculation?.phase === "stale"
+            ? "Tank and fleet values are stale."
+            : "Tank and fleet unavailable.");
+      open.append(
+        element(
+          "div",
+          "calculationState" + (calculation?.phase === "stale" ? " stale" : ""),
+          message,
+        ),
+      );
     }
     const route = [
       scan.scanGate ? scan.scanGate + " gate" : null,
@@ -560,9 +817,7 @@ export function startRenderer(
       element(
         "div",
         "meta",
-        (scan.scout || "?") +
-          (scan.system ? " \u00B7 scanned in " + scan.system : "") +
-          (scan.sec ? " \u00B7 " + scan.sec + " " + (scan.prepped || "") : ""),
+        (scan.scout || "?") + (scan.system ? " \u00B7 scanned in " + scan.system : ""),
       ),
     );
     if (scan.notes) open.append(element("div", "notes", scan.notes));
@@ -635,6 +890,7 @@ export function startRenderer(
   }
 
   function setStatus(status: ConnectionStatus): void {
+    const previousState = currentStatus.state;
     let shown =
       status.lastEventAt === undefined && currentStatus.lastEventAt !== undefined
         ? { ...status, lastEventAt: currentStatus.lastEventAt }
@@ -670,6 +926,24 @@ export function startRenderer(
     currentStatus = shown;
     paintConnectionStatus();
     $("liveStatus").textContent = announcement;
+    if (
+      shown.state === "connecting" ||
+      shown.state === "reconnecting" ||
+      shown.state === "replaying" ||
+      shown.state === "stale" ||
+      shown.state === "offline" ||
+      shown.state === "error"
+    ) {
+      markCalculationsStale();
+    }
+    if (
+      shown.state === "live" &&
+      previousState !== "live" &&
+      previousState !== "clip" &&
+      previousState !== "warn"
+    ) {
+      requestCalculations(scans.map((scan) => scan.id));
+    }
     if (shown.state === "unpaired") {
       paired = false;
       showPair(true, false);
@@ -891,6 +1165,9 @@ export function startRenderer(
   function clearScans(): void {
     const detailWasOpen = activeOverlay === "detail";
     if (detailWasOpen) closeDetail(false);
+    calculationGeneration += 1;
+    calculations.clear();
+    calculationEpochs.clear();
     scans = [];
     render();
     if (detailWasOpen) $("list").focus();
@@ -972,18 +1249,32 @@ export function startRenderer(
   api.onScan((scan) => {
     const existingIndex = scans.findIndex((candidate) => candidate.id === scan.id);
     const refreshDetail = activeOverlay === "detail" && detailScanId === scan.id;
+    calculations.delete(scan.id);
+    calculationEpochs.delete(scan.id);
     if (existingIndex === -1) {
       scans.unshift(scan);
-      if (scans.length > 40) scans.pop();
+      if (scans.length > MAX_RETAINED_SCANS) {
+        const evicted = scans.pop();
+        if (evicted) {
+          calculations.delete(evicted.id);
+          calculationEpochs.delete(evicted.id);
+        }
+      }
     } else {
       scans[existingIndex] = scan;
     }
     render();
     if (refreshDetail) openDetail(scan.id, false);
+    if (currentStatus.state === "live" && currentStatus.protocolVersion === 2) {
+      requestCalculations([scan.id]);
+    }
   });
   api.onStatus(setStatus);
   api.onUnpaired(() => {
     paired = false;
+    calculationGeneration += 1;
+    calculations.clear();
+    calculationEpochs.clear();
     scans = [];
     render();
     showPair(true, false);
@@ -996,14 +1287,25 @@ export function startRenderer(
     else showPair(true, false);
   });
   void api.preferences().then((saved) => {
+    const scenarioChangedFromDefault = !sameScenario(
+      preferences.combatScenario,
+      saved.combatScenario,
+    );
     preferences = saved;
     $("filterQuery").value = saved.filters.query;
     $("filterValue").value =
       saved.filters.minimumSplitValue === null ? "" : String(saved.filters.minimumSplitValue);
     const active = !!saved.filters.query || saved.filters.minimumSplitValue !== null;
     $("filterBtn").classList.toggle("armed", active);
+    paintScenarioControls();
     paintMute();
     render();
+    if (scenarioChangedFromDefault) {
+      calculationGeneration += 1;
+      calculations.clear();
+      calculationEpochs.clear();
+      requestCalculations(scans.map((scan) => scan.id));
+    }
   });
 
   return () => {

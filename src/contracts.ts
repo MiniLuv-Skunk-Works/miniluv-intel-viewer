@@ -36,6 +36,7 @@ export interface FilterPreferences {
 export interface UserPreferences {
   alerts: AlertPreferences;
   filters: FilterPreferences;
+  combatScenario: CombatScenario;
 }
 
 export const DEFAULT_USER_PREFERENCES: Readonly<UserPreferences> = Object.freeze({
@@ -50,6 +51,12 @@ export const DEFAULT_USER_PREFERENCES: Readonly<UserPreferences> = Object.freeze
     quietHours: Object.freeze({ enabled: false, startMinute: 22 * 60, endMinute: 7 * 60 }),
   }),
   filters: Object.freeze({ query: "", minimumSplitValue: null }),
+  combatScenario: Object.freeze({
+    state: "prepped",
+    securityStatus: "0.5",
+    tankState: "active",
+    implant: "none",
+  }),
 });
 
 export function defaultUserPreferences(): UserPreferences {
@@ -62,14 +69,15 @@ export function defaultUserPreferences(): UserPreferences {
       quietHours: { ...DEFAULT_USER_PREFERENCES.alerts.quietHours },
     },
     filters: { ...DEFAULT_USER_PREFERENCES.filters },
+    combatScenario: { ...DEFAULT_USER_PREFERENCES.combatScenario },
   };
 }
 
 // The dashboard owns the wire protocol. Keep this range explicit so a viewer
 // release never silently claims compatibility with semantics it has not been
 // tested against.
-export const VIEWER_PROTOCOL_MIN_VERSION = 1;
-export const VIEWER_PROTOCOL_MAX_VERSION = 1;
+export const VIEWER_PROTOCOL_MIN_VERSION = 2;
+export const VIEWER_PROTOCOL_MAX_VERSION = 2;
 
 export const PROTOCOL_CAPABILITIES = {
   scanFeed: "scan-feed",
@@ -78,6 +86,7 @@ export const PROTOCOL_CAPABILITIES = {
   clipboardVocabulary: "clipboard-vocabulary",
   scanReplay: "scan-replay",
   scanUpdates: "scan-updates",
+  scenarioCalculation: "scenario-calculation",
 } as const;
 
 export type KnownCapability = (typeof PROTOCOL_CAPABILITIES)[keyof typeof PROTOCOL_CAPABILITIES];
@@ -86,7 +95,7 @@ export const KNOWN_CAPABILITIES: readonly KnownCapability[] = Object.freeze(
 );
 
 export type ProtocolCompatibility =
-  "fully-compatible" | "legacy" | "limited-capability" | "newer-protocol";
+  "fully-compatible" | "limited-capability" | "older-protocol" | "newer-protocol";
 
 export interface StoredRectangle {
   x: number;
@@ -184,10 +193,57 @@ export interface UpdateCache {
   } | null;
 }
 
-export interface FleetEntry {
-  name: string;
+export type FleetState = "prepped" | "unprepped";
+export type SecurityStatus = "1" | "0.5" | "0.6" | "0.7" | "0.8" | "0.9";
+export type TankState = "passive" | "active" | "overheated";
+export type ImplantChoice = "none" | "amulet" | "nirvana";
+export type FleetHull = "Talos" | "T2 Cat" | "T1 Cat" | "Hound" | "Purifier";
+
+export interface CombatScenario {
+  state: FleetState;
+  securityStatus: SecurityStatus;
+  tankState: TankState;
+  implant: ImplantChoice;
+}
+
+export interface ViewerRequirementRow {
+  name: FleetHull;
   ships: number;
 }
+
+export interface ViewerScenarioTankResult {
+  selectedProfile: string;
+  selectedEhp: number;
+  ehpByProfile: Record<string, number>;
+  overridden: boolean;
+}
+
+export interface ViewerScenarioCalculationRequest {
+  scanIds: string[];
+  scenario: CombatScenario;
+}
+
+export type ViewerScenarioCalculationResult =
+  | {
+      scanId: string;
+      status: "ready";
+      tank: ViewerScenarioTankResult;
+      requirements: ViewerRequirementRow[];
+    }
+  | { scanId: string; status: "unavailable" }
+  | { scanId: string; status: "not-found" };
+
+export interface ViewerScenarioCalculationResponse {
+  scenario: CombatScenario;
+  results: ViewerScenarioCalculationResult[];
+}
+
+export type ScenarioCalculationFailureReason =
+  "not-paired" | "unsupported" | "rate-limited" | "request-failed";
+
+export type ScenarioCalculationOutcome =
+  | { ok: true; response: ViewerScenarioCalculationResponse }
+  | { ok: false; reason: ScenarioCalculationFailureReason; message: string };
 
 export interface CargoEntry {
   name: string;
@@ -197,23 +253,20 @@ export interface CargoEntry {
 export interface Scan {
   id: string;
   at: number;
+  analysisId?: string;
+  confidence?: string;
   scout?: string;
   hull?: string;
   system?: string;
   pilot?: string;
   scanGate?: string;
   headGate?: string;
-  ammo?: string;
-  sec?: string;
-  prepped?: string;
   notes?: string;
   fitEft?: string;
   valueSell?: number;
   valueBuy?: number;
   valueSplit?: number;
   droppableSplit?: number;
-  ehp?: number;
-  fleetAll?: FleetEntry[];
   cargoList?: CargoEntry[];
 }
 
@@ -314,6 +367,10 @@ export interface IpcInvokeContract {
   clipwatch: { request: boolean | undefined; result: ClipboardResult };
   preferences: { request: undefined; result: UserPreferences };
   savePreferences: { request: UserPreferences; result: UserPreferences };
+  scenarioCalculation: {
+    request: ViewerScenarioCalculationRequest;
+    result: ScenarioCalculationOutcome;
+  };
   diagnostics: { request: undefined; result: DiagnosticsSnapshot };
   checkUpdate: { request: undefined; result: UpdateInfo };
   openUpdate: { request: undefined; result: boolean };
@@ -342,6 +399,7 @@ export interface ViewerApi {
   clipwatch(on?: boolean): Promise<ClipboardResult>;
   preferences(): Promise<UserPreferences>;
   savePreferences(preferences: UserPreferences): Promise<UserPreferences>;
+  calculateScenario(request: ViewerScenarioCalculationRequest): Promise<ScenarioCalculationOutcome>;
   diagnostics(): Promise<DiagnosticsSnapshot>;
   checkUpdate(): Promise<UpdateInfo>;
   openUpdate(): Promise<boolean>;
@@ -362,22 +420,17 @@ function isKnownCapability(value: string): value is KnownCapability {
   return (KNOWN_CAPABILITIES as readonly string[]).includes(value);
 }
 
-type ScanStringKey =
-  | "scout"
-  | "hull"
-  | "system"
-  | "pilot"
-  | "scanGate"
-  | "headGate"
-  | "ammo"
-  | "sec"
-  | "prepped"
-  | "notes"
-  | "fitEft";
-type ScanNumberKey = "valueSell" | "valueBuy" | "valueSplit" | "droppableSplit" | "ehp";
+type ScanStringKey = "hull" | "system" | "pilot" | "scanGate" | "headGate" | "notes" | "fitEft";
+type ScanNumberKey = "valueSell" | "valueBuy" | "valueSplit" | "droppableSplit";
 
 function optionalString(source: UnknownRecord, key: ScanStringKey, target: Scan): boolean {
-  if (!(key in source) || source[key] === undefined || source[key] === null) return true;
+  if (!(key in source) || source[key] === undefined) return true;
+  if (source[key] === null) {
+    // Keep the key enumerable across Electron IPC because preload validates
+    // the normalized payload a second time against the required v2 shape.
+    (target as unknown as UnknownRecord)[key] = undefined;
+    return true;
+  }
   const maximum =
     key === "notes" || key === "fitEft" ? VALIDATION_LIMITS.longText : VALIDATION_LIMITS.label;
   const value = boundedString(source[key], maximum);
@@ -387,7 +440,12 @@ function optionalString(source: UnknownRecord, key: ScanStringKey, target: Scan)
 }
 
 function optionalNumber(source: UnknownRecord, key: ScanNumberKey, target: Scan): boolean {
-  if (!(key in source) || source[key] === undefined || source[key] === null) return true;
+  if (!(key in source) || source[key] === undefined) return true;
+  if (source[key] === null) {
+    // See optionalString: the preload boundary must observe the required key.
+    (target as unknown as UnknownRecord)[key] = undefined;
+    return true;
+  }
   const value = boundedNumberLike(source[key], {
     minimum: 0,
     maximum: Number.MAX_SAFE_INTEGER,
@@ -458,7 +516,7 @@ function parseNullableSplitValue(value: unknown): number | null | undefined {
 
 export function parseUserPreferences(value: unknown): UserPreferences | null {
   const source = plainRecord(value);
-  if (!source || !hasOnlyKeys(source, ["alerts", "filters"])) return null;
+  if (!source || !hasOnlyKeys(source, ["alerts", "filters", "combatScenario"])) return null;
   const alerts = plainRecord(source.alerts);
   const filters = plainRecord(source.filters);
   if (
@@ -488,6 +546,10 @@ export function parseUserPreferences(value: unknown): UserPreferences | null {
   const routes = parsePreferenceList(alerts.routes);
   const quiet = plainRecord(alerts.quietHours);
   const query = boundedString(filters.query, 256);
+  const combatScenario =
+    source.combatScenario === undefined
+      ? { ...DEFAULT_USER_PREFERENCES.combatScenario }
+      : parseCombatScenario(source.combatScenario);
   if (
     minimumSplitValue === undefined ||
     filterMinimumSplitValue === undefined ||
@@ -495,6 +557,7 @@ export function parseUserPreferences(value: unknown): UserPreferences | null {
     !systems ||
     !routes ||
     query === null ||
+    !combatScenario ||
     !quiet ||
     !hasOnlyKeys(quiet, ["enabled", "startMinute", "endMinute"]) ||
     typeof quiet.enabled !== "boolean"
@@ -525,6 +588,7 @@ export function parseUserPreferences(value: unknown): UserPreferences | null {
       quietHours: { enabled: quiet.enabled, startMinute, endMinute },
     },
     filters: { query: query.trim(), minimumSplitValue: filterMinimumSplitValue },
+    combatScenario,
   };
 }
 
@@ -597,12 +661,12 @@ export function parsePairRequest(value: unknown): PairRequest | null {
 }
 
 export function parseScanId(value: unknown): string | null {
-  return boundedString(value, VALIDATION_LIMITS.id, 1);
+  const id = boundedString(value, VALIDATION_LIMITS.id, 1);
+  return id && !/[\r\n\0]/.test(id) ? id : null;
 }
 
 export function parseScanRevisionId(value: unknown): string | null {
-  const id = boundedString(value, VALIDATION_LIMITS.id, 1);
-  return id && !/[\r\n\0]/.test(id) ? id : null;
+  return parseScanId(value);
 }
 
 export function parseOpacity(value: unknown): OpacityLevel | null {
@@ -611,24 +675,6 @@ export function parseOpacity(value: unknown): OpacityLevel | null {
 
 export function parseClipWatchRequest(value: unknown): boolean | undefined | null {
   return value === undefined || typeof value === "boolean" ? value : null;
-}
-
-function parseFleet(value: unknown): FleetEntry[] | null {
-  if (!Array.isArray(value) || value.length > VALIDATION_LIMITS.listEntries) return null;
-  const entries: FleetEntry[] = [];
-  for (const item of value) {
-    const source = plainRecord(item);
-    if (!source) return null;
-    const name = boundedString(source.name, VALIDATION_LIMITS.label);
-    const ships = boundedNumberLike(source.ships, {
-      minimum: 0,
-      maximum: Number.MAX_SAFE_INTEGER,
-      integer: true,
-    });
-    if (name === null || ships === null) return null;
-    entries.push({ name, ships });
-  }
-  return entries;
 }
 
 function parseCargo(value: unknown): CargoEntry[] | null {
@@ -652,44 +698,243 @@ function parseCargo(value: unknown): CargoEntry[] | null {
 export function parseScan(value: unknown): Scan | null {
   const source = plainRecord(value);
   if (!source) return null;
-  const id = boundedString(source.id, VALIDATION_LIMITS.id, 1);
+  const required = [
+    "id",
+    "analysisId",
+    "at",
+    "scout",
+    "confidence",
+    "hull",
+    "system",
+    "scanGate",
+    "headGate",
+    "pilot",
+    "valueSell",
+    "valueBuy",
+    "valueSplit",
+    "droppableSplit",
+    "notes",
+    "fitEft",
+    "cargoList",
+  ];
+  if (!required.every((key) => key in source)) return null;
+  for (const forbidden of [
+    "ehp",
+    "ammo",
+    "fleetAll",
+    "sec",
+    "prepped",
+    "tankState",
+    "implant",
+    "implants",
+    "scenario",
+    "scenarioContext",
+    "variants",
+    "dps",
+    "damagePerShip",
+    "ships",
+  ]) {
+    if (forbidden in source) return null;
+  }
+  const id = parseScanId(source.id);
+  const analysisId = boundedString(source.analysisId, VALIDATION_LIMITS.id, 1);
+  const scout = boundedString(source.scout, VALIDATION_LIMITS.label);
+  const confidence = boundedString(source.confidence, VALIDATION_LIMITS.label);
   const at = boundedNumberLike(source.at, {
     minimum: 0,
     maximum: VALIDATION_LIMITS.maxTimestamp,
     integer: true,
   });
-  if (id === null || at === null) return null;
+  if (id === null || analysisId === null || scout === null || confidence === null || at === null) {
+    return null;
+  }
 
-  const target: Scan = { id, at };
+  const target: Scan = { id, analysisId, at, scout, confidence };
   for (const key of [
-    "scout",
     "hull",
     "system",
     "pilot",
     "scanGate",
     "headGate",
-    "ammo",
-    "sec",
-    "prepped",
     "notes",
     "fitEft",
   ] as const) {
     if (!optionalString(source, key, target)) return null;
   }
-  for (const key of ["valueSell", "valueBuy", "valueSplit", "droppableSplit", "ehp"] as const) {
+  for (const key of ["valueSell", "valueBuy", "valueSplit", "droppableSplit"] as const) {
     if (!optionalNumber(source, key, target)) return null;
   }
-  if (source.fleetAll !== undefined && source.fleetAll !== null) {
-    const fleet = parseFleet(source.fleetAll);
-    if (!fleet) return null;
-    target.fleetAll = fleet;
-  }
-  if (source.cargoList !== undefined && source.cargoList !== null) {
-    const cargo = parseCargo(source.cargoList);
-    if (!cargo) return null;
-    target.cargoList = cargo;
-  }
+  const cargo = parseCargo(source.cargoList);
+  if (!cargo) return null;
+  target.cargoList = cargo;
   return target;
+}
+
+const FLEET_HULLS: readonly FleetHull[] = ["Talos", "T2 Cat", "T1 Cat", "Hound", "Purifier"];
+
+export function parseCombatScenario(value: unknown): CombatScenario | null {
+  const source = plainRecord(value);
+  if (!source || !hasOnlyKeys(source, ["state", "securityStatus", "tankState", "implant"])) {
+    return null;
+  }
+  const state = source.state === "prepped" || source.state === "unprepped" ? source.state : null;
+  const securityStatus =
+    source.securityStatus === "1" ||
+    source.securityStatus === "0.5" ||
+    source.securityStatus === "0.6" ||
+    source.securityStatus === "0.7" ||
+    source.securityStatus === "0.8" ||
+    source.securityStatus === "0.9"
+      ? source.securityStatus
+      : null;
+  const tankState =
+    source.tankState === "passive" ||
+    source.tankState === "active" ||
+    source.tankState === "overheated"
+      ? source.tankState
+      : null;
+  const implant =
+    source.implant === "none" || source.implant === "amulet" || source.implant === "nirvana"
+      ? source.implant
+      : null;
+  return state && securityStatus && tankState && implant
+    ? { state, securityStatus, tankState, implant }
+    : null;
+}
+
+export function parseViewerScenarioCalculationRequest(
+  value: unknown,
+): ViewerScenarioCalculationRequest | null {
+  const source = plainRecord(value);
+  if (
+    !source ||
+    !hasOnlyKeys(source, ["scanIds", "scenario"]) ||
+    !Array.isArray(source.scanIds) ||
+    source.scanIds.length < 1 ||
+    source.scanIds.length > 25
+  ) {
+    return null;
+  }
+  const scanIds: string[] = [];
+  for (const value of source.scanIds) {
+    const scanId = parseScanId(value);
+    if (!scanId || scanIds.includes(scanId)) return null;
+    scanIds.push(scanId);
+  }
+  const scenario = parseCombatScenario(source.scenario);
+  return scenario ? { scanIds, scenario } : null;
+}
+
+function parseScenarioTankResult(value: unknown): ViewerScenarioTankResult | null {
+  const source = plainRecord(value);
+  if (
+    !source ||
+    !hasOnlyKeys(source, ["selectedProfile", "selectedEhp", "ehpByProfile", "overridden"])
+  ) {
+    return null;
+  }
+  const selectedProfile = boundedString(source.selectedProfile, 120, 1);
+  const selectedEhp = boundedNumber(source.selectedEhp, {
+    minimum: Number.MIN_VALUE,
+    maximum: 1_000_000_000_000,
+  });
+  const profiles = plainRecord(source.ehpByProfile);
+  if (!selectedProfile || selectedEhp === null || !profiles) return null;
+  const profileEntries = Object.entries(profiles);
+  if (profileEntries.length < 1 || profileEntries.length > 16) return null;
+  const ehpByProfile: Record<string, number> = {};
+  for (const [name, value] of profileEntries) {
+    if (!boundedString(name, 120, 1)) return null;
+    const ehp = boundedNumber(value, {
+      minimum: Number.MIN_VALUE,
+      maximum: 1_000_000_000_000,
+    });
+    if (ehp === null) return null;
+    ehpByProfile[name] = ehp;
+  }
+  if (typeof source.overridden !== "boolean") return null;
+  return { selectedProfile, selectedEhp, ehpByProfile, overridden: source.overridden };
+}
+
+function parseRequirementRows(input: unknown): ViewerRequirementRow[] | null {
+  if (!Array.isArray(input) || input.length > FLEET_HULLS.length) return null;
+  const requirements: ViewerRequirementRow[] = [];
+  for (const value of input) {
+    const source = plainRecord(value);
+    if (!source || !hasOnlyKeys(source, ["name", "ships"])) return null;
+    const name =
+      typeof source.name === "string" && FLEET_HULLS.includes(source.name as FleetHull)
+        ? (source.name as FleetHull)
+        : null;
+    const ships = boundedNumber(source.ships, {
+      minimum: 1,
+      maximum: Number.MAX_SAFE_INTEGER,
+      integer: true,
+    });
+    if (!name || ships === null) return null;
+    requirements.push({ name, ships });
+  }
+  return requirements;
+}
+
+export function parseViewerScenarioCalculationResponse(
+  value: unknown,
+): ViewerScenarioCalculationResponse | null {
+  const source = plainRecord(value);
+  if (!source || !hasOnlyKeys(source, ["scenario", "results"])) return null;
+  const scenario = parseCombatScenario(source.scenario);
+  if (
+    !scenario ||
+    !Array.isArray(source.results) ||
+    source.results.length < 1 ||
+    source.results.length > 25
+  ) {
+    return null;
+  }
+  const results: ViewerScenarioCalculationResult[] = [];
+  for (const value of source.results) {
+    const result = plainRecord(value);
+    const scanId = result ? parseScanId(result.scanId) : null;
+    if (!result || !scanId) return null;
+    if (result.status === "unavailable" || result.status === "not-found") {
+      if (!hasOnlyKeys(result, ["scanId", "status"])) return null;
+      results.push({ scanId, status: result.status });
+      continue;
+    }
+    if (
+      result.status !== "ready" ||
+      !hasOnlyKeys(result, ["scanId", "status", "tank", "requirements"])
+    ) {
+      return null;
+    }
+    const tank = parseScenarioTankResult(result.tank);
+    const requirements = parseRequirementRows(result.requirements);
+    if (!tank || !requirements) return null;
+    results.push({ scanId, status: "ready", tank, requirements });
+  }
+  return { scenario, results };
+}
+
+export function parseScenarioCalculationOutcome(value: unknown): ScenarioCalculationOutcome | null {
+  const source = plainRecord(value);
+  if (!source || typeof source.ok !== "boolean") return null;
+  if (source.ok) {
+    if (!hasOnlyKeys(source, ["ok", "response"])) return null;
+    const response = parseViewerScenarioCalculationResponse(source.response);
+    return response ? { ok: true, response } : null;
+  }
+  if (!hasOnlyKeys(source, ["ok", "reason", "message"])) return null;
+  const reasons: readonly ScenarioCalculationFailureReason[] = [
+    "not-paired",
+    "unsupported",
+    "rate-limited",
+    "request-failed",
+  ];
+  const reason = reasons.includes(source.reason as ScenarioCalculationFailureReason)
+    ? (source.reason as ScenarioCalculationFailureReason)
+    : null;
+  const message = boundedString(source.message, VALIDATION_LIMITS.label, 1);
+  return reason && message ? { ok: false, reason, message } : null;
 }
 
 export function parseBumpEvent(value: unknown): BumpEvent | null {
@@ -799,14 +1044,11 @@ export function parseHelloEvent(value: unknown): HelloEvent | null {
 }
 
 export function negotiateProtocol(hello: HelloEvent): ProtocolNegotiation {
-  // Either missing field identifies a pre-negotiation dashboard. Preserve the
-  // released viewer's behavior instead of interpreting an incomplete additive
-  // rollout as a denial of every optional feature.
   if (hello.protocolVersion === undefined || hello.capabilities === undefined) {
     return {
-      compatibility: "legacy",
-      capabilities: [...KNOWN_CAPABILITIES],
-      missingCapabilities: [],
+      compatibility: "older-protocol",
+      capabilities: [],
+      missingCapabilities: [...KNOWN_CAPABILITIES],
     };
   }
 
@@ -818,6 +1060,14 @@ export function negotiateProtocol(hello: HelloEvent): ProtocolNegotiation {
   if (hello.protocolVersion > VIEWER_PROTOCOL_MAX_VERSION) {
     return {
       compatibility: "newer-protocol",
+      protocolVersion: hello.protocolVersion,
+      capabilities,
+      missingCapabilities,
+    };
+  }
+  if (hello.protocolVersion < VIEWER_PROTOCOL_MIN_VERSION) {
+    return {
+      compatibility: "older-protocol",
       protocolVersion: hello.protocolVersion,
       capabilities,
       missingCapabilities,
@@ -911,7 +1161,7 @@ export function parseConnectionStatus(value: unknown): ConnectionStatus | null {
   if (source.compatibility !== undefined) {
     const compatibilities: readonly ProtocolCompatibility[] = [
       "fully-compatible",
-      "legacy",
+      "older-protocol",
       "limited-capability",
       "newer-protocol",
     ];

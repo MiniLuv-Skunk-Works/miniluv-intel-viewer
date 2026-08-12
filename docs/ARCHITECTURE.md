@@ -56,29 +56,32 @@ normalized before they reach the renderer and must not expose credentials.
 
 ## Persistence and credentials
 
-Non-secret settings remain in memory and are written atomically to
-`settings.json` after a debounce. The EVE vocabulary cache uses the same safe
-replacement model. Corrupt JSON is preserved with a `.corrupt-<timestamp>`
-suffix rather than silently overwritten.
+Non-secret settings, including the universal combat scenario, remain in memory
+and are written atomically to `settings.json` after a debounce. Older valid
+preference files without a scenario migrate to the safe default: prepped, 0.5
+security, active tank, and no implant package. The EVE vocabulary cache uses the
+same safe replacement model. Corrupt JSON is preserved with a
+`.corrupt-<timestamp>` suffix rather than silently overwritten.
 
 The dashboard bearer credential is stored separately in `credential.bin` and
 encrypted with Electron `safeStorage` on Windows. A legacy plaintext token is
 migrated and removed. Decryption failure returns the viewer to pairing without
 placing the token in logs, IPC, or renderer state.
 
-## Dashboard protocol version 1
+## Dashboard protocol version 2
 
 The dashboard is the wire-protocol source of truth. The viewer keeps local
 runtime parsers and a representative fixture so it can be released and tested
 without importing private dashboard packages.
 
 Pairing exchanges a one-time code for an encrypted-at-rest bearer credential.
-Authenticated bounded JSON requests provide vocabulary, bump control, and
-clipboard relay. The live feed is Server-Sent Events (SSE). Its `hello` event
+Authenticated bounded JSON requests provide vocabulary, bump control,
+clipboard relay, and request-scoped scenario calculations. The live feed is
+Server-Sent Events (SSE). Its `hello` event
 advertises the dashboard `protocolVersion`, capabilities, and replay state;
 subsequent events carry scans, bumps, and cleared bumps.
 
-Version 1 recognizes these capabilities:
+Version 2 recognizes these capabilities:
 
 - `scan-feed`
 - `bump-control`
@@ -86,18 +89,29 @@ Version 1 recognizes these capabilities:
 - `clipboard-vocabulary`
 - `scan-replay`
 - `scan-updates`
+- `scenario-calculation`
 
-Unknown capability strings are ignored. A version-1 dashboard that omits a
+Unknown capability strings are ignored. A version-2 dashboard that omits a
 known capability remains connected, but the corresponding optional operation
 is unavailable.
 
+Scan events contain shared scan facts only. They do not contain scenario
+choices, EHP, DPS, fleet requirements, or the dashboard's private tank context.
+The scenario-calculation contract accepts 1 to 25 unique scan IDs and a complete
+`{ state, securityStatus, tankState, implant }` scenario. Its response preserves
+request order and classifies each ID as `ready`, `unavailable`, or `not-found`.
+The renderer persists one local combat scenario, keeps calculation results in a
+map separate from scan facts, and renders cards and details from that map. It
+batches the retained replay after replay settles, refreshes one stable scan ID
+for a live publication or revision, and refreshes all retained IDs when a
+scenario control changes. Scenario generations and per-scan request epochs
+prevent older responses from replacing newer selections or revisions.
+
 Bump events carry the authoritative server epoch `at`, total `holdMs`, and the
 server-calculated `remainingMs`. The viewer prefers `remainingMs` so wall-clock
-skew cannot lengthen a hold. For compatibility with older dashboards that omit
-it, the viewer derives the initial remainder once from `at` and `holdMs`; events
-that omit both timing additions retain the legacy full-hold behavior. After
-receipt, countdown painting uses only the local monotonic clock. Bump state is
-not persisted because the dashboard remains the source of truth.
+skew cannot lengthen a hold. After receipt, countdown painting uses only the
+local monotonic clock. Bump state is not persisted because the dashboard
+remains the source of truth.
 
 ## Replay and connection ownership
 
@@ -130,9 +144,11 @@ without another retained scan.
 
 ## User preferences, notifications, and updates
 
-Alert and filter preferences are non-secret settings validated on disk and at
-the IPC boundary. The sandboxed renderer may edit those preferences, but the
-main process evaluates alert rules and owns Electron's native notification API.
+Alert, filter, and combat-scenario preferences are non-secret settings validated
+on disk and at the IPC boundary. The sandboxed renderer may edit those
+preferences, but the main process evaluates alert rules, owns Electron's native
+notification API, and performs authenticated scenario-calculation requests. The
+scenario is not added to shared scan events or persisted by the dashboard.
 Alert matching uses `valueSplit`; configured alert categories use OR semantics,
 while the compact text/minimum-value feed filters use AND semantics and never
 affect alert evaluation.
@@ -150,21 +166,20 @@ repository. No artifact is downloaded or executed by the viewer.
 
 ## Compatibility rules
 
-- A hello event without `protocolVersion` or `capabilities` is legacy. Existing
-  feed, bump, and clipboard behavior remains available.
-- Protocol version 1 uses capability negotiation for optional operations.
-- A newer protocol version can continue supplying the basic scan feed, but the
-  viewer displays a compact warning and disables writes and clipboard relay
-  until that version is supported.
+- A hello event without `protocolVersion` or `capabilities` is incompatible.
+- Protocol versions below or above 2 are rejected; no scan-only fallback is
+  provided across this semantic break.
+- Protocol version 2 uses capability negotiation for optional operations.
 - Additive fields do not require a protocol version increase. Semantic changes
   do, and optional behavior should be advertised with a capability.
 
 The portable viewer fixture is
-`tests/fixtures/viewer-protocol-v1.json`. To test a dashboard checkout's fixture
+`tests/fixtures/viewer-protocol-v2.json`. The v1 fixture is retained only to
+prove rejection. To test a dashboard checkout's fixture
 against the viewer parsers:
 
 ```powershell
-$env:DASHBOARD_VIEWER_PROTOCOL_FIXTURE = "D:\path\to\dashboard\packages\contracts\fixtures\viewer-protocol-v1.json"
+$env:DASHBOARD_VIEWER_PROTOCOL_FIXTURE = "D:\path\to\dashboard\packages\contracts\fixtures\viewer-protocol-v2.json"
 npm test
 Remove-Item Env:DASHBOARD_VIEWER_PROTOCOL_FIXTURE
 ```
