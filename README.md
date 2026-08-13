@@ -42,6 +42,12 @@ verification commands.
 3. Enter the dashboard address and one-time pairing code in the viewer.
 4. New scans appear as they are posted.
 
+Clipboard capture is optional. In viewer settings, enable **clipboard watching**
+to relay recognized EVE fits and cargo while the EVE client is the active
+application. To capture character names as well, separately enable **Detect
+copied EVE pilot names** after connecting to a compatible dashboard. Confirmed
+names fill the dashboard's pilot field only when that field is empty.
+
 The viewer remembers its dashboard address, encrypted pairing credential,
 window position, opacity, feed filters, alert rules, and combat scenario under
 `%APPDATA%\milf-viewer`. Use **Re-pair** in viewer settings or the tray menu to
@@ -58,7 +64,9 @@ connect it to another dashboard.
 - Always-on-top, resizable Windows overlay with three opacity levels
 - Per-scan bump controls and locally counted countdown timers
 - Tray controls for showing, clearing, repositioning, and re-pairing
-- Optional clipboard watching for EVE fits and cargo lists
+- Optional, foreground-gated clipboard watching for EVE fits and cargo lists
+- Separate opt-in detection of copied EVE character names, confirmed directly
+  with CCP ESI before relay to the paired dashboard
 - Replay recovery after brief network interruptions
 - Connection freshness, last-event time, and privacy-safe diagnostics
 - Independent compact feed filters using text and minimum split value
@@ -70,10 +78,29 @@ connect it to another dashboard.
 ## Privacy and security
 
 Clipboard watching is **off by default** and visibly indicated when enabled.
-Classification happens locally before any request is made. The filter rejects
+Every new clipboard value is considered only when the foreground Windows
+process is EVE's `exefile.exe`; an unknown, inaccessible, or non-EVE foreground
+process fails closed before classification or networking. Classification of
+fits and cargo happens locally before any request is made. The filter rejects
 secrets, URLs, email addresses, source code, prose, and content that does not
 match the paired dashboard's EVE item vocabulary. If the vocabulary is
 unavailable, the filter fails closed and sends nothing.
+
+Pilot-name detection requires a second, independent opt-in and a paired
+dashboard that advertises pilot-relay support. Plausible character names are
+sent directly to CCP ESI as one-name resolution requests. Only an exact,
+case-insensitive character match is relayed, using ESI's canonical spelling;
+unconfirmed input is discarded. Checks are serialized and rate-limited, honor
+ESI's error-limit response headers, use bounded positive and negative caches,
+and do not log candidate names or response bodies. A short EVE chat phrase can
+still resemble a character name and be checked with ESI, as disclosed beside
+the setting.
+
+Clipboard observation currently polls every 500 ms. Foreground identity is
+bound to each observed clipboard generation, but there is a narrow residual
+race if application focus changes between copying and the next poll. See the
+architecture documentation for the full boundary and future event-driven
+alternative.
 
 Desktop alerts are also **off by default**. Alert matching happens locally and
 is independent of visible-feed filters. Notifications use generic lock-screen
@@ -129,7 +156,9 @@ npm run verify
 
 The full gate checks formatting, lint rules, and TypeScript types; runs Node and
 real-Electron tests; builds `dist\MILF-Viewer-<version>.exe`; and launches the
-packaged artifact for a render-and-quit smoke test.
+packaged artifact for a render-and-quit smoke test. The packaged smoke test also
+verifies that the native Win32 foreground-process probe can load and fails
+closed when no EVE foreground identity is resolved.
 
 For detailed setup, packaging, troubleshooting, and manual Windows checks, see
 [BUILD.md](docs/BUILD.md). Outside contributors should also read
@@ -142,6 +171,11 @@ persistence, and native windows. A context-isolated preload bridge exposes only
 validated viewer operations to the sandboxed renderer. The viewer pairs over
 bounded JSON requests and consumes a capability-negotiated SSE feed with replay
 cursor and duplicate suppression.
+
+Pilot clipboard relay is negotiated independently through the
+`clipboard-pilot-relay` capability. The main process owns foreground-window
+inspection and direct ESI validation; neither native process details nor raw
+clipboard candidates are exposed to the renderer.
 
 The viewer supports dashboard protocol version 2 as a clean break. It rejects
 legacy, version-1, and future protocol feeds, and has no runtime dependency on
