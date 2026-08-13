@@ -7,6 +7,7 @@
     "clipboard-vocabulary",
     "scan-replay",
     "scan-updates",
+    "scan-removals",
     "scenario-calculation"
   ],
   "events": {
@@ -21,6 +22,7 @@
         "clipboard-vocabulary",
         "scan-replay",
         "scan-updates",
+        "scan-removals",
         "scenario-calculation"
       ],
       "replay": { "status": "snapshot" }
@@ -44,6 +46,7 @@
       "fitEft": "[Obelisk, Fixture]\nDamage Control II",
       "cargoList": [{ "name": "Tritanium", "qty": 5000 }]
     },
+    "scanRemoved": { "scanId": "fixture-scan-0001" },
     "bump": {
       "scanId": "fixture-scan-0001",
       "at": 1754000005000,

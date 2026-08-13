@@ -86,6 +86,7 @@ export const PROTOCOL_CAPABILITIES = {
   clipboardVocabulary: "clipboard-vocabulary",
   scanReplay: "scan-replay",
   scanUpdates: "scan-updates",
+  scanRemovals: "scan-removals",
   scenarioCalculation: "scenario-calculation",
 } as const;
 
@@ -289,6 +290,10 @@ export interface BumpClearedEvent {
   scanId: string;
 }
 
+export interface ScanRemovedEvent {
+  scanId: string;
+}
+
 export interface Vocabulary {
   words: string[];
   buildNumber?: number;
@@ -379,6 +384,7 @@ export interface IpcInvokeContract {
 
 export interface IpcEventContract {
   scan: Scan;
+  scanRemoved: ScanRemovedEvent;
   status: ConnectionStatus;
   clear: undefined;
   repair: undefined;
@@ -405,6 +411,7 @@ export interface ViewerApi {
   openUpdate(): Promise<boolean>;
   quit(): Promise<void>;
   onScan(listener: (scan: Scan) => void): void;
+  onScanRemoved(listener: (event: ScanRemovedEvent) => void): void;
   onStatus(listener: (status: ConnectionStatus) => void): void;
   onClear(listener: () => void): void;
   onRepair(listener: () => void): void;
@@ -993,6 +1000,13 @@ export function parseBumpResponse(value: unknown): BumpEvent | null {
 export function parseBumpClearedEvent(value: unknown): BumpClearedEvent | null {
   const source = plainRecord(value);
   const scanId = source ? boundedString(source.scanId, VALIDATION_LIMITS.id, 1) : null;
+  return scanId === null ? null : { scanId };
+}
+
+export function parseScanRemovedEvent(value: unknown): ScanRemovedEvent | null {
+  const source = plainRecord(value);
+  if (!source || !hasOnlyKeys(source, ["scanId"])) return null;
+  const scanId = parseScanId(source.scanId);
   return scanId === null ? null : { scanId };
 }
 

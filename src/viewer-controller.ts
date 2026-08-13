@@ -11,6 +11,7 @@ import {
   parseClipboardRelayResponse,
   parseHelloEvent,
   parseScan,
+  parseScanRemovedEvent,
   parseScanRevisionId,
   parseServerError,
   parseViewerScenarioCalculationResponse,
@@ -632,6 +633,14 @@ export class ViewerController {
       else if (!isUpdate) this.alertService.handle(scan);
       return true;
     }
+    if (event === "scanRemoved") {
+      const removed = parseScanRemovedEvent(parsed);
+      if (!removed || (id !== undefined && parseScanRevisionId(id) === null)) return false;
+      this.acceptedEvent();
+      this.relay("scanRemoved", removed);
+      if (this.connectionStatus.state === "replaying") this.scheduleReplaySettled(true);
+      return true;
+    }
     if (event === "bump") {
       const bump = parseBumpEvent(parsed);
       if (!bump) return false;
@@ -669,6 +678,9 @@ export class ViewerController {
       });
     }
     const status = this.protocolStatus(hello.name, this.protocol);
+    if (hello.replay && hello.replay.status !== "resumed") {
+      this.relay("clear", undefined);
+    }
     if (replaySupported && hello.replay?.status === "cursor-expired") {
       this.relay("notice", {
         level: "warn",
@@ -732,6 +744,7 @@ export class ViewerController {
       "clipboard-vocabulary": "clipboard vocabulary",
       "scan-replay": "scan replay",
       "scan-updates": "scan updates",
+      "scan-removals": "scan removals",
       "scenario-calculation": "scenario calculations",
     };
     const detail =

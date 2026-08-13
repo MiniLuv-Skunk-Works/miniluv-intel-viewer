@@ -12,6 +12,7 @@ import {
   parseOpacity,
   parsePairResult,
   parseScan,
+  parseScanRemovedEvent,
   parseScenarioCalculationOutcome,
   parseViewerScenarioCalculationRequest,
   parseViewerState,
@@ -106,6 +107,11 @@ const api: ViewerApi = {
     onIpc("scan", (value) => {
       const scan = parseScan(value);
       if (scan) listener(scan);
+    }),
+  onScanRemoved: (listener) =>
+    onIpc("scanRemoved", (value) => {
+      const removed = parseScanRemovedEvent(value);
+      if (removed) listener(removed);
     }),
   onStatus: (listener) =>
     onIpc("status", (value) => {
