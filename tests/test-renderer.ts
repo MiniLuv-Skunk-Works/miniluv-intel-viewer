@@ -6,6 +6,7 @@ import type {
   BumpClearedEvent,
   BumpEvent,
   ClipboardResult,
+  PilotClipboardResult,
   ConnectionStatus,
   OpacityLevel,
   PairResult,
@@ -51,10 +52,12 @@ class FakeApi implements ViewerApi {
   private bumpListener: (bump: BumpEvent) => void = () => undefined;
   private bumpClearedListener: (event: BumpClearedEvent) => void = () => undefined;
   private clipListener: (result: ClipboardResult) => void = () => undefined;
+  private pilotClipListener: (result: PilotClipboardResult) => void = () => undefined;
   private unpairedListener: () => void = () => undefined;
   private noticeListener: (notice: UserNotice) => void = () => undefined;
   private updateListener: (update: UpdateInfo) => void = () => undefined;
   preferenceValue: UserPreferences = defaultUserPreferences();
+  pilotClipboardValue: PilotClipboardResult = { on: false, available: false };
 
   pair(serverUrl: string, code: string): Promise<PairResult> {
     this.pairCalls.push([serverUrl, code]);
@@ -76,6 +79,12 @@ class FakeApi implements ViewerApi {
   }
   clipwatch(): Promise<ClipboardResult> {
     return Promise.resolve(emptyClipboard());
+  }
+  pilotclipwatch(on?: boolean): Promise<PilotClipboardResult> {
+    if (on !== undefined && this.pilotClipboardValue.available) {
+      this.pilotClipboardValue = { ...this.pilotClipboardValue, on };
+    }
+    return Promise.resolve(this.pilotClipboardValue);
   }
   preferences(): Promise<UserPreferences> {
     return Promise.resolve(this.preferenceValue);
@@ -155,6 +164,9 @@ class FakeApi implements ViewerApi {
   onClipWatch(listener: (result: ClipboardResult) => void): void {
     this.clipListener = listener;
   }
+  onPilotClipWatch(listener: (result: PilotClipboardResult) => void): void {
+    this.pilotClipListener = listener;
+  }
   onUnpaired(listener: () => void): void {
     this.unpairedListener = listener;
   }
@@ -187,6 +199,10 @@ class FakeApi implements ViewerApi {
   }
   emitClip(result: ClipboardResult): void {
     this.clipListener(result);
+  }
+  emitPilotClip(result: PilotClipboardResult): void {
+    this.pilotClipboardValue = result;
+    this.pilotClipListener(result);
   }
   emitUnpaired(): void {
     this.unpairedListener();
@@ -665,6 +681,29 @@ async function run(): Promise<void> {
     "clipboard toggle exposes its state",
     clipButton?.getAttribute("aria-pressed") === "true" &&
       clipButton.getAttribute("aria-label")?.startsWith("Disable"),
+  );
+  const pilotClipboard = document.getElementById("pilotClipToggle") as HTMLInputElement | null;
+  ok(
+    "pilot detection starts unchecked and disabled",
+    pilotClipboard?.checked === false && pilotClipboard.disabled,
+  );
+  api.emitPilotClip({ on: false, available: true });
+  ok("compatible live dashboards enable pilot detection", pilotClipboard?.disabled === false);
+  pilotClipboard?.click();
+  await Promise.resolve();
+  ok(
+    "pilot detection changes are announced and reflected",
+    pilotClipboard?.checked === true && liveStatus?.textContent?.includes("enabled"),
+  );
+  api.emitPilotClip({ on: true, available: false });
+  ok(
+    "stored pilot opt-in is preserved but disabled when capability is unavailable",
+    pilotClipboard?.checked === true && pilotClipboard.disabled,
+  );
+  ok(
+    "clipboard disclosures explain the foreground gate and residual ESI risk",
+    document.getElementById("clipboardDisclosure")?.textContent?.includes("EVE client") &&
+      document.getElementById("pilotClipboardDisclosure")?.textContent?.includes("chat phrase"),
   );
   ok(
     "abbreviated controls have accessible names",

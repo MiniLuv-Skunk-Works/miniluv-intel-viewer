@@ -1,6 +1,7 @@
 import type { IpcMain, IpcMainInvokeEvent, WebContents } from "electron";
 import {
   parseClipWatchRequest,
+  parsePilotClipWatchRequest,
   parseNoArguments,
   parseOpacity,
   parsePairRequest,
@@ -10,6 +11,7 @@ import {
   defaultUserPreferences,
   type BumpResult,
   type ClipboardResult,
+  type PilotClipboardResult,
   type IpcInvokeContract,
   type OpacityLevel,
   type PairRequest,
@@ -30,6 +32,7 @@ export interface ViewerActions {
   setOpacity(level: OpacityLevel): OpacityLevel;
   bump(scanId: string): Promise<BumpResult>;
   clipboard(on: boolean | undefined): ClipboardResult;
+  pilotClipboard(on: boolean | undefined): PilotClipboardResult;
   preferences(): UserPreferences;
   savePreferences(preferences: UserPreferences): UserPreferences;
   calculateScenario(request: ViewerScenarioCalculationRequest): Promise<ScenarioCalculationOutcome>;
@@ -120,6 +123,17 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => 
       return on === null
         ? { ...options.actions.clipboard(undefined), error: "invalid clipboard setting" }
         : options.actions.clipboard(on);
+    },
+  );
+
+  handle(
+    "pilotclipwatch",
+    () => ({ on: false, available: false, error: "Request rejected." }),
+    (_event, input) => {
+      const on = parsePilotClipWatchRequest(input);
+      return on === null
+        ? { ...options.actions.pilotClipboard(undefined), error: "invalid pilot setting" }
+        : options.actions.pilotClipboard(on);
     },
   );
 

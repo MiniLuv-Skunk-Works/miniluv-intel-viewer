@@ -149,13 +149,28 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     await page.locator("#settingsBtn").click();
     await page.locator("#clipBtn").click();
     await expect(page.locator("#clipBtn")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("#pilotClipToggle")).toBeEnabled();
+    await page.locator("#pilotClipToggle").check();
+    await expect(page.locator("#pilotClipToggle")).toBeChecked();
     await application.evaluate(
       ({ clipboard }, value) => clipboard.writeText(value),
       "Tritanium\t100\nPyerite\t200",
     );
     await waitForRequest(dashboard, "/api/viewer/clip");
+    const clipRequestsBeforePilot = dashboard.requests.filter(
+      (request) => request.path === "/api/viewer/clip",
+    ).length;
+    await application.evaluate(
+      ({ clipboard }, value) => clipboard.writeText(value),
+      "Fixture Pilot",
+    );
+    await waitForRequestCount(dashboard, "/api/viewer/clip", clipRequestsBeforePilot + 1);
+    expect(
+      dashboard.requests.filter((request) => request.path === "/api/viewer/clip").at(-1)?.body,
+    ).toEqual({ kind: "pilot", text: "Fixture Pilot" });
     await page.locator("#clipBtn").click();
     await expect(page.locator("#clipBtn")).toHaveAttribute("aria-pressed", "false");
+    await expect(page.locator("#pilotClipToggle")).toBeDisabled();
     await application.evaluate(
       ({ clipboard }, value) => clipboard.writeText(value),
       originalClipboard,
@@ -223,6 +238,7 @@ async function launchApplication(
     env: {
       ...process.env,
       MILF_VIEWER_E2E: "1",
+      MILF_VIEWER_E2E_FOREGROUND: "eve",
       MILF_VIEWER_E2E_USER_DATA: path.join(profileRoot, "userdata"),
       APPDATA: path.join(profileRoot, "appdata"),
       LOCALAPPDATA: path.join(profileRoot, "localappdata"),

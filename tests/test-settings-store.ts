@@ -161,10 +161,13 @@ async function run(): Promise<void> {
   );
 
   store.scheduleSave({ watchClipboard: true });
+  store.scheduleSave({ watchPilotClipboard: true });
   await store.flush();
   ok(
     "flush persists a pending debounce immediately",
-    JSON.parse(fs.files.get(file)!).watchClipboard === true && timers.active() === 0,
+    JSON.parse(fs.files.get(file)!).watchClipboard === true &&
+      JSON.parse(fs.files.get(file)!).watchPilotClipboard === true &&
+      timers.active() === 0,
   );
 
   console.log("\n=== combat scenario settings migration ===");

@@ -701,6 +701,12 @@
       .viewerActions button.wide {
         grid-column: 1 / -1;
       }
+      .settingDisclosure {
+        margin: 6px 0 0;
+        color: var(--dim);
+        font-size: 11px;
+        line-height: 1.35;
+      }
       .timeRow {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -963,8 +969,9 @@
               type="button"
               id="clipBtn"
               aria-pressed="false"
-              aria-label="Enable clipboard scan watching"
-              title="Watch the clipboard and send EVE scans to the dashboard"
+              aria-label="Enable clipboard watching while EVE is active"
+              aria-describedby="clipboardDisclosure"
+              title="While EVE is active, watch for fit, cargo, and opted-in pilot captures"
             >
               clipboard: off
             </button>
@@ -1002,6 +1009,24 @@
               re-pair
             </button>
           </div>
+          <p class="settingDisclosure" id="clipboardDisclosure">
+            Fit, cargo, and optional pilot captures are considered only while the EVE client is
+            the active application.
+          </p>
+          <label class="inline">
+            <input
+              id="pilotClipToggle"
+              type="checkbox"
+              aria-describedby="pilotClipboardDisclosure"
+              disabled
+            />
+            Detect copied EVE pilot names
+          </label>
+          <p class="settingDisclosure" id="pilotClipboardDisclosure">
+            When EVE is active, plausible names are checked with CCP ESI and confirmed character
+            names are sent to your paired dashboard. A short EVE chat phrase can still resemble a
+            name and be checked with ESI.
+          </p>
         </fieldset>
         <fieldset class="formGroup">
           <legend>Desktop alerts</legend>

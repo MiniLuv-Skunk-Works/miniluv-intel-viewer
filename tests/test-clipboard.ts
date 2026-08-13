@@ -4,7 +4,11 @@
 // a breach. The rejection cases matter more than the acceptance ones.
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { classify as classifyRaw, isSlotHeader } from "../src/clipboard-filter";
+import {
+  classify as classifyRaw,
+  isSlotHeader,
+  plausibleCharacterName,
+} from "../src/clipboard-filter";
 import { ok } from "./support/assertions";
 
 // A slice of EVE's real vocabulary. The live one comes from the SDE.
@@ -42,6 +46,38 @@ const forbidden = {
 for (const [what, text] of Object.entries(forbidden)) {
   const r = classify(text);
   ok("rejects " + what, r === null, r && JSON.stringify(r).slice(0, 90));
+}
+
+console.log("\n=== locally plausible pilot names ===");
+for (const name of [
+  "Abc",
+  `A${"b".repeat(17)} ${"c".repeat(18)}`,
+  "John Smith",
+  "Pilot-2",
+  "O'Brien",
+  "  Fixture Pilot  ",
+]) {
+  ok(`accepts ${JSON.stringify(name)}`, plausibleCharacterName(name) === name.trim());
+}
+for (const [what, value] of Object.entries({
+  "too short": "Ab",
+  "too long": `A${"b".repeat(37)}`,
+  "multiple lines": "Pilot\nName",
+  tab: "Pilot\tName",
+  NUL: "Pilot\0Name",
+  "Unicode lookalike": "Pilоt Name",
+  "leading punctuation": "-Pilot",
+  "trailing punctuation": "Pilot'",
+  URL: "https://example.invalid",
+  email: "pilot@example.invalid",
+  secret: "api_key Pilot",
+  JSON: '{"pilot":"Fixture Pilot"}',
+  code: "const Pilot = 1",
+  fit: "High Power\nDamage Control II",
+  cargo: "Tritanium\t100",
+  "Unicode outer space": "\u00a0Fixture Pilot\u00a0",
+})) {
+  ok(`rejects pilot candidate ${what}`, plausibleCharacterName(value) === null);
 }
 
 console.log("\n=== should be sent, as a FIT ===");

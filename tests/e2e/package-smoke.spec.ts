@@ -39,6 +39,8 @@ test("portable executable launches, renders, and quits", async ({
         env: {
           ...process.env,
           MILF_VIEWER_E2E: "1",
+          MILF_VIEWER_E2E_FOREGROUND: "unknown",
+          MILF_VIEWER_E2E_REQUIRE_FOREGROUND_PROBE: "1",
           MILF_VIEWER_E2E_USER_DATA: path.join(profileRoot, "userdata"),
           APPDATA: path.join(profileRoot, "appdata"),
           LOCALAPPDATA: path.join(profileRoot, "localappdata"),
@@ -57,6 +59,7 @@ test("portable executable launches, renders, and quits", async ({
     await expect(page).toHaveTitle("M.I.L.F Viewer");
     await expect(page.locator("#pairTitle")).toHaveText("Pair this viewer");
     await expect(page.locator("#pair")).toHaveClass(/show/);
+    await expect(page.locator("#pilotClipToggle")).toBeDisabled();
 
     const exited = new Promise<void>((resolve, reject) => {
       child?.once("exit", (code) => (code === 0 ? resolve() : reject(new Error(`exit ${code}`))));

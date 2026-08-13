@@ -19,6 +19,7 @@ import {
   type BumpResult,
   type ClipboardCapture,
   type ClipboardResult,
+  type PilotClipboardResult,
   type ConnectionStatus,
   defaultUserPreferences,
   type DiagnosticsSnapshot,
@@ -103,6 +104,7 @@ export class ViewerController {
   private replayLiveStatus: ConnectionStatus = { state: "live" };
   private readonly seenStableScanIds = new Set<string>();
   private readonly seenStableScanIdOrder: string[] = [];
+  private lastPilotClipboardState = "";
 
   constructor(options: ViewerControllerOptions) {
     this.settingsStore = options.settingsStore;
@@ -174,6 +176,7 @@ export class ViewerController {
     this.connect();
     this.fetchVocabulary();
     if (this.clipboardWatching()) this.clipboardWatcher.start();
+    this.refreshPilotClipboard();
     void this.updateChecker.check(false);
   }
 
@@ -200,6 +203,7 @@ export class ViewerController {
     this.startupPairingDetail = null;
     this.protocol = null;
     this.clipboardWatcher.setVocabulary(null);
+    this.refreshPilotClipboard();
     this.fetchVocabulary();
     this.connect();
     return { ok: true };
@@ -211,6 +215,7 @@ export class ViewerController {
     this.startupPairingDetail = null;
     await this.credentials.clear();
     await this.settingsStore.saveNow({}, ["token"]);
+    this.refreshPilotClipboard();
     this.relay("unpaired", undefined);
     this.emitStatus({ state: "unpaired" });
     return true;
@@ -390,7 +395,25 @@ export class ViewerController {
     this.settingsStore.scheduleSave({ watchClipboard: on });
     if (on) this.clipboardWatcher.start();
     else this.clipboardWatcher.stop();
+    this.refreshPilotClipboard();
     this.relay("clipwatch", { on, stats: this.clipboardWatcher.stats() });
+  }
+
+  pilotClipboard(on: boolean | undefined): PilotClipboardResult {
+    const available = this.pilotClipboardAvailable();
+    if (on === undefined) {
+      return { on: this.pilotClipboardPreference(), available };
+    }
+    if (on && !available) {
+      return {
+        on: this.pilotClipboardPreference(),
+        available,
+        error: "pilot detection requires an active compatible dashboard connection",
+      };
+    }
+    this.settingsStore.scheduleSave({ watchPilotClipboard: on });
+    this.refreshPilotClipboard(true);
+    return { on, available: this.pilotClipboardAvailable() };
   }
 
   async shutdown(): Promise<void> {
@@ -445,6 +468,7 @@ export class ViewerController {
     this.connectionStatus = merged;
     this.diagnosticsRecorder.setConnection(merged);
     this.relay("status", merged);
+    this.refreshPilotClipboard();
   }
 
   private handleFeedStatus(status: FeedConnectionStatus): void {
@@ -568,6 +592,14 @@ export class ViewerController {
         on: this.clipboardWatching(),
         stats: this.clipboardWatcher.stats(),
         error: "dashboard does not advertise clipboard relay",
+      });
+      return;
+    }
+    if (capture.kind === "pilot" && !this.supports(PROTOCOL_CAPABILITIES.clipboardPilotRelay)) {
+      this.relay("clipwatch", {
+        on: this.clipboardWatching(),
+        stats: this.clipboardWatcher.stats(),
+        error: "dashboard does not advertise pilot clipboard relay",
       });
       return;
     }
@@ -742,6 +774,7 @@ export class ViewerController {
       "bump-control": "bumping",
       "clipboard-relay": "clipboard relay",
       "clipboard-vocabulary": "clipboard vocabulary",
+      "clipboard-pilot-relay": "pilot clipboard relay",
       "scan-replay": "scan replay",
       "scan-updates": "scan updates",
       "scan-removals": "scan removals",
@@ -767,6 +800,34 @@ export class ViewerController {
     this.dashboardClient.cancelAll();
     this.protocol = null;
     await this.credentials.clear();
+    this.refreshPilotClipboard();
     this.emitStatus({ state: "unpaired", detail: "pairing expired - pair again" });
+  }
+
+  private pilotClipboardPreference(): boolean {
+    return !!this.settingsStore.get().watchPilotClipboard;
+  }
+
+  private pilotClipboardAvailable(): boolean {
+    return (
+      this.clipboardWatching() &&
+      this.session() !== null &&
+      (this.connectionStatus.state === "live" || this.connectionStatus.state === "replaying") &&
+      this.supports(PROTOCOL_CAPABILITIES.clipboardRelay) &&
+      this.supports(PROTOCOL_CAPABILITIES.clipboardVocabulary) &&
+      this.supports(PROTOCOL_CAPABILITIES.clipboardPilotRelay)
+    );
+  }
+
+  private refreshPilotClipboard(forceRelay = false): void {
+    const result: PilotClipboardResult = {
+      on: this.pilotClipboardPreference(),
+      available: this.pilotClipboardAvailable(),
+    };
+    this.clipboardWatcher.setPilotDetection(result.on && result.available);
+    const state = `${result.on}:${result.available}`;
+    if (!forceRelay && state === this.lastPilotClipboardState) return;
+    this.lastPilotClipboardState = state;
+    this.relay("pilotclipwatch", result);
   }
 }

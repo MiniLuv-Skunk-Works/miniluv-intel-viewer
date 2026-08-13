@@ -38,6 +38,27 @@ const NEVER = [
   /password|passwd|secret|api[_ -]?key|bearer/i,
 ];
 
+function isNeverText(text: string): boolean {
+  return NEVER.some((pattern) => pattern.test(text));
+}
+
+/** Return one locally plausible EVE character name without performing I/O. */
+export function plausibleCharacterName(raw: unknown): string | null {
+  if (typeof raw !== "string" || raw.length > 37) return null;
+  for (const character of raw) {
+    const code = character.charCodeAt(0);
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return null;
+  }
+  if (isNeverText(raw)) return null;
+
+  const candidate = raw.replace(/^ +| +$/g, "");
+  if (raw.trim() !== candidate || candidate.length < 3 || candidate.length > 37) return null;
+  if (!/^(?=.{3,37}$)(?=.*[A-Za-z])[A-Za-z0-9][A-Za-z0-9 '-]*[A-Za-z0-9]$/.test(candidate)) {
+    return null;
+  }
+  return candidate;
+}
+
 export function isSlotHeader(line: unknown): boolean {
   return SLOT_HEADER.test(String(line).trim());
 }
@@ -66,9 +87,7 @@ export function classify(
   if (!text.trim()) return null;
   if (text.length > 64_000) return null;
 
-  for (const pattern of NEVER) {
-    if (pattern.test(text)) return null;
-  }
+  if (isNeverText(text)) return null;
 
   const lines = text
     .split(/\r?\n/)

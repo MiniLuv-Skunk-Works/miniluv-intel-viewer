@@ -42,6 +42,7 @@ describe("main-process authority", () => {
       "opacity",
       "bump",
       "clipwatch",
+      "pilotclipwatch",
       "preferences",
       "savePreferences",
       "scenarioCalculation",

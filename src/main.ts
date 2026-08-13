@@ -7,6 +7,15 @@ import { AlertService } from "./alerting";
 import * as path from "node:path";
 import { ClipboardWatcher } from "./clipboard-watcher";
 import {
+  WindowsForegroundApplicationProbe,
+  type ForegroundApplicationProbe,
+} from "./foreground-application";
+import {
+  EsiPilotNameHttpClient,
+  PilotNameValidator,
+  type PilotNameValidation,
+} from "./pilot-name-validator";
+import {
   parseSettingsDocument,
   parseVocabulary,
   type IpcEventContract,
@@ -78,6 +87,23 @@ const updateChecker = new UpdateChecker({
   onUpdate: (update) => windowManager?.relay("update", update),
   onError: () => diagnostics.record("update-check"),
 });
+const windowsForegroundProbe = new WindowsForegroundApplicationProbe();
+if (
+  process.env.MILF_VIEWER_E2E_REQUIRE_FOREGROUND_PROBE === "1" &&
+  !windowsForegroundProbe.isAvailable()
+) {
+  throw new Error("The packaged foreground application probe is unavailable.");
+}
+const foregroundProbe: ForegroundApplicationProbe =
+  process.env.MILF_VIEWER_E2E_FOREGROUND === "eve"
+    ? { isEveClientForeground: () => Promise.resolve(true) }
+    : process.env.MILF_VIEWER_E2E_FOREGROUND === "unknown"
+      ? { isEveClientForeground: () => Promise.resolve(false) }
+      : windowsForegroundProbe;
+const pilotValidator: PilotNameValidation =
+  process.env.MILF_VIEWER_E2E === "1"
+    ? { validate: (candidate) => Promise.resolve(candidate) }
+    : new PilotNameValidator(new EsiPilotNameHttpClient(app.getVersion()));
 const controller = new ViewerController({
   settingsStore,
   credentials,
@@ -89,6 +115,8 @@ const controller = new ViewerController({
     new ClipboardWatcher({
       ...callbacks,
       readText: () => clipboard.readText(),
+      foregroundProbe,
+      pilotValidator,
     }),
   alertService,
   diagnostics,
@@ -117,6 +145,7 @@ const disposeIpc = registerIpcHandlers({
     setOpacity: (level) => controller.setOpacity(level),
     bump: (scanId) => controller.bump(scanId),
     clipboard: (on) => controller.clipboard(on),
+    pilotClipboard: (on) => controller.pilotClipboard(on),
     preferences: () => controller.preferences(),
     savePreferences: (preferences) => controller.savePreferences(preferences),
     calculateScenario: (request) => controller.calculateScenario(request),

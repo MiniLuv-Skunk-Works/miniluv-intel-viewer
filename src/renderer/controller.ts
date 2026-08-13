@@ -45,6 +45,7 @@ interface Elements {
   detailClose: HTMLButtonElement;
   repairBtn: HTMLButtonElement;
   clipBtn: HTMLButtonElement;
+  pilotClipToggle: HTMLInputElement;
   clearBtn: HTMLButtonElement;
   filterBtn: HTMLButtonElement;
   muteBtn: HTMLButtonElement;
@@ -1128,7 +1129,7 @@ export function startRenderer(
     $("clipBtn").textContent = "clipboard: " + (on ? "on" : "off");
     $("clipBtn").setAttribute(
       "aria-label",
-      (on ? "Disable" : "Enable") + " clipboard scan watching",
+      (on ? "Disable" : "Enable") + " clipboard watching while EVE is active",
     );
   }
   $("clipBtn").addEventListener("click", () => {
@@ -1154,6 +1155,26 @@ export function startRenderer(
     }
   });
   void api.clipwatch(undefined).then((result) => setClipButton(!!result?.on));
+
+  function setPilotClipboardControl(result: { on: boolean; available: boolean }): void {
+    $("pilotClipToggle").checked = result.on;
+    $("pilotClipToggle").disabled = !result.available;
+    $("pilotClipToggle").setAttribute("aria-disabled", String(!result.available));
+    $("pilotClipToggle").title = result.available
+      ? "Check plausible copied names with CCP ESI"
+      : "Enable clipboard watching and connect to a compatible dashboard first";
+  }
+  $("pilotClipToggle").addEventListener("change", () => {
+    const requested = $("pilotClipToggle").checked;
+    void api.pilotclipwatch(requested).then((result) => {
+      setPilotClipboardControl(result);
+      $("liveStatus").textContent = result.error
+        ? result.error
+        : `Pilot clipboard detection ${result.on ? "enabled" : "disabled"}`;
+    });
+  });
+  api.onPilotClipWatch(setPilotClipboardControl);
+  void api.pilotclipwatch(undefined).then(setPilotClipboardControl);
 
   function clearScans(): void {
     const detailWasOpen = activeOverlay === "detail";
