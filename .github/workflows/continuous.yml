@@ -100,6 +100,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          retry() {
+            local description="$1"
+            shift
+            local attempt=1
+            local max_attempts=6
+            local delay=5
+
+            until "$@"; do
+              if (( attempt >= max_attempts )); then
+                echo "::error::$description failed after $attempt attempts" >&2
+                return 1
+              fi
+
+              echo "::warning::$description failed on attempt $attempt; retrying in ${delay}s" >&2
+              sleep "$delay"
+              attempt=$((attempt + 1))
+              delay=$((delay < 30 ? delay * 2 : 30))
+            done
+          }
+
           if ! gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/continuous" \
             --method PATCH --field sha="$GITHUB_SHA" --field force=true >/dev/null 2>&1; then
             gh api "repos/$GITHUB_REPOSITORY/git/refs" \
@@ -109,14 +129,14 @@ jobs:
           asset_sha256="$(cut -d' ' -f1 dist/MILF-Viewer-latest.exe.sha256)"
           notes="Automatically rebuilt from main commit $GITHUB_SHA. SHA-256: $asset_sha256"
           if gh release view continuous >/dev/null 2>&1; then
-            gh release edit continuous \
+            retry "Edit continuous release" gh release edit continuous \
               --title "MILF Viewer continuous build" --notes "$notes" --prerelease
           else
-            gh release create continuous --verify-tag --latest=false \
+            retry "Create continuous release" gh release create continuous --verify-tag --latest=false \
               --title "MILF Viewer continuous build" --notes "$notes" --prerelease
           fi
 
-          gh release upload continuous \
+          retry "Upload continuous release assets" gh release upload continuous \
             dist/MILF-Viewer-latest.exe \
             dist/MILF-Viewer-latest.exe.sha256 \
             --clobber
