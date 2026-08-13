@@ -284,13 +284,8 @@ export class FeedConnectionManager {
             armActivityTimers();
             try {
               for (const message of parser.push(chunk)) {
-                const advancesCursor =
-                  message.event === "scan" || message.event === "scanRemoved";
-                if (
-                  advancesCursor &&
-                  message.id &&
-                  this.seenFeedRevisionIds.has(message.id)
-                )
+                const advancesCursor = message.event === "scan" || message.event === "scanRemoved";
+                if (advancesCursor && message.id && this.seenFeedRevisionIds.has(message.id))
                   continue;
                 const accepted = this.callbacks.onEvent(message);
                 if (advancesCursor && message.id && accepted !== false) {
