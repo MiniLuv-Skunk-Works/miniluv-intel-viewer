@@ -8,7 +8,7 @@ import {
   type UnknownRecord,
 } from "./validation";
 
-export type ClipboardKind = "fit" | "cargo";
+export type ClipboardKind = "fit" | "cargo" | "pilot";
 export type OpacityLevel = 0 | 1 | 2;
 
 export interface QuietHours {
@@ -84,6 +84,7 @@ export const PROTOCOL_CAPABILITIES = {
   bumpControl: "bump-control",
   clipboardRelay: "clipboard-relay",
   clipboardVocabulary: "clipboard-vocabulary",
+  clipboardPilotRelay: "clipboard-pilot-relay",
   scanReplay: "scan-replay",
   scanUpdates: "scan-updates",
   scanRemovals: "scan-removals",
@@ -126,6 +127,7 @@ export interface Settings {
   windowPlacement?: WindowPlacement;
   opacity?: OpacityLevel;
   watchClipboard?: boolean;
+  watchPilotClipboard?: boolean;
   preferences?: UserPreferences;
   updateCache?: UpdateCache;
 }
@@ -325,6 +327,12 @@ export interface ClipboardResult {
   error?: string | null;
 }
 
+export interface PilotClipboardResult {
+  on: boolean;
+  available: boolean;
+  error?: string | null;
+}
+
 export interface PairRequest {
   serverUrl: string;
   code: string;
@@ -370,6 +378,7 @@ export interface IpcInvokeContract {
   opacity: { request: number; result: OpacityLevel };
   bump: { request: string; result: BumpResult };
   clipwatch: { request: boolean | undefined; result: ClipboardResult };
+  pilotclipwatch: { request: boolean | undefined; result: PilotClipboardResult };
   preferences: { request: undefined; result: UserPreferences };
   savePreferences: { request: UserPreferences; result: UserPreferences };
   scenarioCalculation: {
@@ -391,6 +400,7 @@ export interface IpcEventContract {
   bump: BumpEvent;
   bumpCleared: BumpClearedEvent;
   clipwatch: ClipboardResult;
+  pilotclipwatch: PilotClipboardResult;
   unpaired: undefined;
   notice: UserNotice;
   update: UpdateInfo;
@@ -403,6 +413,7 @@ export interface ViewerApi {
   setOpacity(level: number): Promise<OpacityLevel>;
   bump(scanId: string): Promise<BumpResult>;
   clipwatch(on?: boolean): Promise<ClipboardResult>;
+  pilotclipwatch(on?: boolean): Promise<PilotClipboardResult>;
   preferences(): Promise<UserPreferences>;
   savePreferences(preferences: UserPreferences): Promise<UserPreferences>;
   calculateScenario(request: ViewerScenarioCalculationRequest): Promise<ScenarioCalculationOutcome>;
@@ -418,6 +429,7 @@ export interface ViewerApi {
   onBump(listener: (bump: BumpEvent) => void): void;
   onBumpCleared(listener: (event: BumpClearedEvent) => void): void;
   onClipWatch(listener: (result: ClipboardResult) => void): void;
+  onPilotClipWatch(listener: (result: PilotClipboardResult) => void): void;
   onUnpaired(listener: () => void): void;
   onNotice(listener: (notice: UserNotice) => void): void;
   onUpdate(listener: (update: UpdateInfo) => void): void;
@@ -646,6 +658,8 @@ export function parseSettings(value: unknown): Settings {
   if (source.opacity === 0 || source.opacity === 1 || source.opacity === 2)
     settings.opacity = source.opacity;
   if (typeof source.watchClipboard === "boolean") settings.watchClipboard = source.watchClipboard;
+  settings.watchPilotClipboard =
+    typeof source.watchPilotClipboard === "boolean" ? source.watchPilotClipboard : false;
   const preferences = parseUserPreferences(source.preferences);
   if (preferences) settings.preferences = preferences;
   const updateCache = parseUpdateCache(source.updateCache);
@@ -681,6 +695,10 @@ export function parseOpacity(value: unknown): OpacityLevel | null {
 }
 
 export function parseClipWatchRequest(value: unknown): boolean | undefined | null {
+  return value === undefined || typeof value === "boolean" ? value : null;
+}
+
+export function parsePilotClipWatchRequest(value: unknown): boolean | undefined | null {
   return value === undefined || typeof value === "boolean" ? value : null;
 }
 
@@ -1323,7 +1341,7 @@ export function parseClipboardStats(value: unknown): ClipboardStats | null {
     sent === null ||
     ignored === null ||
     lastAt === null ||
-    (lastKind !== null && lastKind !== "fit" && lastKind !== "cargo")
+    (lastKind !== null && lastKind !== "fit" && lastKind !== "cargo" && lastKind !== "pilot")
   )
     return null;
   return { sent, ignored, lastAt, lastKind };
@@ -1362,7 +1380,8 @@ export function parseClipboardResult(value: unknown): ClipboardResult | null {
     result.ignored = source.ignored;
   }
   if (source.sentKind !== undefined) {
-    if (source.sentKind !== "fit" && source.sentKind !== "cargo") return null;
+    if (source.sentKind !== "fit" && source.sentKind !== "cargo" && source.sentKind !== "pilot")
+      return null;
     result.sentKind = source.sentKind;
   }
   if (source.delivered !== undefined) {
@@ -1380,6 +1399,26 @@ export function parseClipboardResult(value: unknown): ClipboardResult | null {
   if (source.error !== undefined) {
     if (source.error !== null && boundedString(source.error, VALIDATION_LIMITS.label) === null)
       return null;
+    result.error = source.error as string | null;
+  }
+  return result;
+}
+
+export function parsePilotClipboardResult(value: unknown): PilotClipboardResult | null {
+  const source = plainRecord(value);
+  if (
+    !source ||
+    !hasOnlyKeys(source, ["on", "available", "error"]) ||
+    typeof source.on !== "boolean" ||
+    typeof source.available !== "boolean"
+  ) {
+    return null;
+  }
+  const result: PilotClipboardResult = { on: source.on, available: source.available };
+  if (source.error !== undefined) {
+    if (source.error !== null && boundedString(source.error, VALIDATION_LIMITS.label) === null) {
+      return null;
+    }
     result.error = source.error as string | null;
   }
   return result;
@@ -1420,6 +1459,21 @@ export function parseClipboardRelayResponse(value: unknown): ClipboardRelayRespo
     integer: true,
   });
   return delivered === null ? null : { delivered };
+}
+
+export function parseClipboardCapture(value: unknown): ClipboardCapture | null {
+  const source = plainRecord(value);
+  if (!source || !hasOnlyKeys(source, ["kind", "text"])) return null;
+  const kind = source.kind;
+  const text = boundedString(source.text, VALIDATION_LIMITS.longText, 1);
+  if ((kind !== "fit" && kind !== "cargo" && kind !== "pilot") || text === null) return null;
+  if (
+    kind === "pilot" &&
+    !/^(?=.{3,37}$)(?=.*[A-Za-z])[A-Za-z0-9][A-Za-z0-9 '-]*[A-Za-z0-9]$/.test(text)
+  ) {
+    return null;
+  }
+  return { kind, text };
 }
 
 export function parseNoArguments(value: unknown): value is undefined {

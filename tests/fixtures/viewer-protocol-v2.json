@@ -5,6 +5,7 @@
     "bump-control",
     "clipboard-relay",
     "clipboard-vocabulary",
+    "clipboard-pilot-relay",
     "scan-replay",
     "scan-updates",
     "scan-removals",
@@ -20,6 +21,7 @@
         "bump-control",
         "clipboard-relay",
         "clipboard-vocabulary",
+        "clipboard-pilot-relay",
         "scan-replay",
         "scan-updates",
         "scan-removals",
@@ -58,6 +60,10 @@
     "bumpCleared": { "scanId": "fixture-scan-0001" }
   },
   "apiRequests": {
+    "clipboardRelay": {
+      "kind": "pilot",
+      "text": "Fixture Pilot"
+    },
     "scenarioCalculation": {
       "scanIds": ["fixture-scan-0001", "fixture-scan-unavailable", "fixture-scan-expired"],
       "scenario": {

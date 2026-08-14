@@ -11,7 +11,9 @@ import {
   parseClaimResponse,
   parseCombatScenario,
   parseClipboardRelayResponse,
+  parseClipboardCapture,
   parseClipboardResult,
+  parsePilotClipboardResult,
   parseConnectionStatus,
   parseHelloEvent,
   parseNoArguments,
@@ -52,11 +54,18 @@ const settings = parseSettings({
   },
   opacity: 2,
   watchClipboard: true,
+  watchPilotClipboard: true,
   unexpected: "discard me",
 });
 ok(
   "known settings survive",
   settings.serverUrl === "https://dashboard.example" && settings.opacity === 2,
+);
+ok("pilot clipboard preference survives", settings.watchPilotClipboard === true);
+ok(
+  "missing or malformed pilot clipboard preferences default off",
+  parseSettings({}).watchPilotClipboard === false &&
+    parseSettings({ watchPilotClipboard: "yes" }).watchPilotClipboard === false,
 );
 ok(
   "display-aware placement survives validation",
@@ -306,6 +315,10 @@ ok(
   "version-2 full capability set is fully compatible",
   hello !== null && negotiateProtocol(hello).compatibility === "fully-compatible",
 );
+ok(
+  "pilot clipboard support is capability-negotiated",
+  KNOWN_CAPABILITIES.includes(PROTOCOL_CAPABILITIES.clipboardPilotRelay),
+);
 
 const legacy = parseHelloEvent({ name: "Legacy MiniLuv" });
 ok(
@@ -480,6 +493,10 @@ ok(
 );
 ok("fixture scan parses", parseScan(eventValue(fixture, ["scan", "scanEvent"])) !== null);
 const fixtureApiRequests = asRecord(asRecord(fixture)?.apiRequests);
+ok(
+  "fixture contains a bounded canonical pilot relay",
+  parseClipboardCapture(fixtureApiRequests?.clipboardRelay)?.kind === "pilot",
+);
 const fixtureScenarioRequest = parseViewerScenarioCalculationRequest(
   fixtureApiRequests?.scenarioCalculation,
 );
@@ -527,9 +544,7 @@ ok(
 );
 ok(
   "fixture clipboard relay response parses",
-  parseClipboardRelayResponse(
-    response(namedValue(fixture, ["clipboardRelay", "clipboardResponse"])),
-  )?.delivered === 1,
+  parseClipboardRelayResponse(response(fixtureApiResponses?.clipboardRelay))?.delivered === 1,
 );
 const fixtureReplay = asRecord(namedValue(fixture, ["replay"]));
 const fixtureReplayStates = asRecord(fixtureReplay?.states);
@@ -625,13 +640,18 @@ ok(
 ok("vocabulary rejects mixed word arrays", parseVocabulary({ words: ["tritanium", 7] }) === null);
 const clipboard = parseClipboardResult({
   on: true,
-  stats: { sent: 1, ignored: 2, lastKind: "fit", lastAt: 10 },
-  sentKind: "fit",
+  stats: { sent: 1, ignored: 2, lastKind: "pilot", lastAt: 10 },
+  sentKind: "pilot",
   delivered: 1,
 });
 ok(
   "valid clipboard result parses",
-  clipboard?.delivered === 1 && clipboard.stats.lastKind === "fit",
+  clipboard?.delivered === 1 && clipboard.stats.lastKind === "pilot",
+);
+ok(
+  "pilot clipboard control results are strict",
+  parsePilotClipboardResult({ on: true, available: true })?.available === true &&
+    parsePilotClipboardResult({ on: true, available: true, extra: true }) === null,
 );
 ok(
   "clipboard rejects malformed stats",

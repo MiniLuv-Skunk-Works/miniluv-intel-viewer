@@ -7,6 +7,7 @@ import {
   parseBumpEvent,
   parseBumpResult,
   parseClipboardResult,
+  parsePilotClipboardResult,
   parseConnectionStatus,
   parseDiagnosticsSnapshot,
   parseOpacity,
@@ -66,6 +67,12 @@ const api: ViewerApi = {
       on: false,
       stats: { sent: 0, ignored: 0, lastKind: null, lastAt: 0 },
       error: "Invalid clipboard response.",
+    },
+  pilotclipwatch: async (on) =>
+    parsePilotClipboardResult(await invokeUnknown("pilotclipwatch", on)) ?? {
+      on: false,
+      available: false,
+      error: "Invalid pilot clipboard response.",
     },
   preferences: async () =>
     parseUserPreferences(await invokeUnknown("preferences", undefined)) ?? defaultUserPreferences(),
@@ -133,6 +140,11 @@ const api: ViewerApi = {
   onClipWatch: (listener) =>
     onIpc("clipwatch", (value) => {
       const result = parseClipboardResult(value);
+      if (result) listener(result);
+    }),
+  onPilotClipWatch: (listener) =>
+    onIpc("pilotclipwatch", (value) => {
+      const result = parsePilotClipboardResult(value);
       if (result) listener(result);
     }),
   onUnpaired: (listener) => onIpc("unpaired", listener),

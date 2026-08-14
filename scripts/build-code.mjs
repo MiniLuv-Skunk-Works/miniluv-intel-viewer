@@ -21,6 +21,7 @@ if (testsOnly) {
     target: "node22",
     sourcemap: "linked",
     logLevel: "info",
+    external: ["koffi"],
   });
 } else {
   await rm(outdir, { recursive: true, force: true });
@@ -41,7 +42,7 @@ if (testsOnly) {
       platform: "node",
       format: "cjs",
       target: "node24",
-      external: ["electron"],
+      external: ["electron", "koffi"],
       sourcemap: "linked",
       logLevel: "info",
     }),

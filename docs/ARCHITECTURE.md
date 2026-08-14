@@ -28,6 +28,17 @@ MILF Viewer uses Electron's main, preload, and renderer separation:
 5. The sandboxed renderer builds the interface with browser APIs and receives
    only validated, user-safe data. It has no Node.js or filesystem access.
 
+### Clipboard foreground gate
+
+Clipboard observation remains a 500 ms main-process poll. For each new value,
+the watcher snapshots the text and a generation before resolving the current
+foreground window through Win32 process APIs. That focus result is used once
+for that immutable generation, and unknown or non-EVE identities fail closed
+before classification or networking. Polling leaves a narrow race when focus
+changes between the user's copy and the next poll; automatic capture must move
+to a Windows clipboard-update notification if product requirements later need
+a tighter binding than this documented residual race.
+
 The renderer uses context isolation, disables Node integration, blocks
 navigation and new windows, and runs under a restrictive Content Security
 Policy. IPC handlers accept calls only from the viewer window's main frame and

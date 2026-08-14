@@ -33,6 +33,7 @@ describe("viewer scan revisions", () => {
       stop: () => undefined,
       stats: () => ({ sent: 0, ignored: 0, lastKind: null, lastAt: 0 }),
       vocabularySize: () => 0,
+      setPilotDetection: () => undefined,
     } as unknown as ClipboardWatcher;
     const alerts = {
       setArmed: () => undefined,
