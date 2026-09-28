@@ -29,16 +29,16 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
-    "@types/node": "^26.5.1",
+    "@types/node": "^26.6.2",
     "electron": "^43.3.0",
     "electron-builder": "^26.16.1",
     "esbuild": "^0.28.2",
-    "eslint": "^10.10.0",
+    "eslint": "^10.11.0",
     "globals": "^17.12.0",
-    "happy-dom": "^20.14.3",
-    "prettier": "^3.9.6",
+    "happy-dom": "^20.14.5",
+    "prettier": "^3.9.9",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.70.0"
+    "typescript-eslint": "^8.70.1"
   },
   "build": {
     "appId": "space.miniluv.milfviewer",
@@ -73,6 +73,6 @@
     "compression": "maximum"
   },
   "dependencies": {
-    "koffi": "^3.2.1"
+    "koffi": "^3.3.1"
   }
 }
