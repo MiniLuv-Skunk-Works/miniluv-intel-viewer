@@ -170,6 +170,15 @@
         outline-offset: 2px;
       }
 
+      #connectionNotice {
+        padding: 8px 10px;
+        color: #ffd2a8;
+        background: #34271e;
+        font-size: 12px;
+        line-height: 1.4;
+        overflow-wrap: anywhere;
+      }
+
       .status-visually-hidden {
         position: absolute;
         width: 1px;
@@ -813,6 +822,8 @@
           &times;
         </button>
       </header>
+      <div id="connectionNotice" hidden></div>
+
       <fieldset
         id="scenarioControls"
         aria-label="Tank and fleet calculations for every scan"

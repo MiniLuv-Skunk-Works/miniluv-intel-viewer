@@ -405,3 +405,72 @@ ok(
   "authentication expiry is terminal and does not retry",
   unauthorized === 1 && authClock.active().length === 0,
 );
+
+console.log("\n=== connection-limit errors remain visible during retries ===");
+const limitClock = new FakeClock();
+const limitTransport = harness();
+const limitStatuses: string[] = [];
+const limitManager = new FeedConnectionManager({
+  request: limitTransport.request,
+  setTimer: limitClock.set,
+  clearTimer: limitClock.clear,
+  random: () => 0,
+  responseTimeoutMs: 20,
+  onStatus: (status) =>
+    limitStatuses.push(status.state + ("detail" in status ? ":" + status.detail : "")),
+  onEvent: () => {},
+  onUnauthorized: () => {
+    throw new Error("A connection limit must not unpair the viewer");
+  },
+});
+limitManager.start({ serverUrl: "https://limit.example", token: "token" });
+const limitResponse = limitTransport.attempts[0]!.respond(429, "text/plain");
+limitResponse.emit("data", "too many viewers open ");
+limitResponse.emit("data", "for this account");
+limitResponse.emit("end");
+ok("account limit explains the four-connection cap", limitStatuses.at(-1)?.includes("maximum 4"));
+ok("retry keeps the actual error and timing", limitStatuses.at(-1)?.includes("Retrying in 1s."));
+limitClock.run(limitClock.active(500)[0]!);
+ok(
+  "the next attempt retains the limit message",
+  limitStatuses.at(-1)?.includes("maximum 4") && limitStatuses.at(-1)?.includes("Retrying now."),
+);
+limitResponse.emit("error", new Error("late response error"));
+ok(
+  "old limit responses cannot cancel the new attempt",
+  !limitTransport.attempts[1]!.request.destroyed,
+);
+limitTransport.attempts[1]!.respond();
+ok("successful connection clears the limit notice", limitStatuses.at(-1) === "live");
+limitManager.stop();
+
+for (const mode of ["global", "oversized", "html", "timeout", "aborted", "replaced"] as const) {
+  limitManager.start({ serverUrl: "https://limit.example", token: "token" });
+  const response = limitTransport.attempts.at(-1)!.respond(429, "text/plain");
+  if (mode === "global") response.emit("data", "viewer connection capacity reached");
+  if (mode === "oversized") response.emit("data", "x".repeat(1_025));
+  if (mode === "html") response.emit("data", "<script>private proxy text</script>");
+  if (mode === "timeout") limitClock.run(limitClock.active(20)[0]!);
+  else if (mode === "aborted") response.emit("aborted");
+  else if (mode === "replaced") {
+    limitManager.start({ serverUrl: "https://new.example", token: "new-token" });
+    response.emit("data", "too many viewers open for this account");
+    response.emit("end");
+    ok("re-pair ignores an old pending error response", limitStatuses.at(-1) === "connecting");
+    limitManager.stop();
+    continue;
+  } else response.emit("end");
+  ok(
+    `${mode} error response is bounded and retried once`,
+    response.destroyed && limitClock.active().length === 1,
+  );
+  ok(
+    `${mode} response has a safe specific or fallback message`,
+    limitStatuses.at(-1)?.includes(mode === "global" ? "connection capacity" : "HTTP 429"),
+  );
+  ok(
+    "proxy response text is never rendered",
+    !limitStatuses.at(-1)?.includes("private proxy text"),
+  );
+  limitManager.stop();
+}

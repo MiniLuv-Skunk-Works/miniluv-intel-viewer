@@ -19,6 +19,7 @@ import { ViewerController, type FeedConnectionLike } from "../src/viewer-control
 describe("viewer pilot clipboard negotiation", () => {
   it("preserves opt-in but enables runtime validation only while compatible and connected", async () => {
     let callbacks: FeedConnectionCallbacks | undefined;
+    const statuses: IpcEventContract["status"][] = [];
     let state: Settings = {
       serverUrl: "https://dashboard.example",
       watchClipboard: true,
@@ -62,6 +63,7 @@ describe("viewer pilot clipboard negotiation", () => {
       dashboardClient,
       allowInsecureLocalhost: false,
       relay: <K extends keyof IpcEventContract>(channel: K, payload: IpcEventContract[K]) => {
+        if (channel === "status") statuses.push(payload as IpcEventContract["status"]);
         if (channel === "pilotclipwatch") {
           pilotEvents.push(payload as IpcEventContract["pilotclipwatch"]);
         }
@@ -110,7 +112,11 @@ describe("viewer pilot clipboard negotiation", () => {
     assert.deepEqual(controller.pilotClipboard(undefined), { on: true, available: true });
     assert.equal(pilotRuntime.at(-1), true);
 
-    callbacks.onStatus({ state: "reconnecting", detail: "2s" });
+    const limitDetail =
+      "Too many viewers open for this Discord account (maximum 4). Retrying in 2s.";
+    callbacks.onStatus({ state: "reconnecting", detail: limitDetail });
+    assert.equal(statuses.at(-1)?.state, "reconnecting");
+    assert.equal(statuses.at(-1)?.detail, limitDetail);
     assert.deepEqual(controller.pilotClipboard(undefined), { on: true, available: false });
     assert.equal(state.watchPilotClipboard, true);
     assert.equal(pilotRuntime.at(-1), false);

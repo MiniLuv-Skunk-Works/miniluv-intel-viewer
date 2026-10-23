@@ -10,7 +10,7 @@ MILF Viewer is a portable Windows application. Packaging produces one
 - npm
 
 Node.js 22 is the supported development and CI runtime declared by
-`package.json`. Electron 43 includes Node.js 24 inside the packaged application;
+`package.json`. Electron 44 includes Node.js 24 inside the packaged application;
 that bundled runtime does not change the development requirement.
 
 ## Install and run from source

@@ -130,11 +130,23 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     const calculationsBeforeReconnect = dashboard.requests.filter(
       (request) => request.path === "/api/viewer/scenario-calculations",
     ).length;
+    dashboard.feedLimitError = "too many viewers open for this account";
     dashboard.disconnectFeeds();
+    await expect(page.locator("#connectionNotice")).toBeVisible();
+    await expect(page.locator("#connectionNotice")).toContainText("maximum 4");
+    await expect(page.locator("#connectionNotice")).toContainText("Retrying");
+    expect(
+      await page
+        .locator("#connectionNotice")
+        .evaluate((notice) => notice.scrollWidth <= notice.clientWidth),
+    ).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("connection-limit.png") });
+    dashboard.feedLimitError = null;
     await dashboard.waitForFeedCount(1);
     const feeds = dashboard.requests.filter((request) => request.path === "/api/feed");
     expect(feeds.at(-1)?.lastEventId).toBe(`revision-scan-${hostile}`);
     dashboard.sendHello();
+    await expect(page.locator("#connectionNotice")).toBeHidden();
     dashboard.sendScan({ id: `scan-${hostile}`, at: Date.now(), hull: "duplicate" });
     dashboard.sendScan({ id: "scan-after-reconnect", at: Date.now(), hull: "Providence" });
     await waitForRequestCount(

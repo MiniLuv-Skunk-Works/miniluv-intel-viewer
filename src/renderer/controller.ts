@@ -63,6 +63,7 @@ interface Elements {
   list: HTMLElement;
   dot: HTMLElement;
   status: HTMLElement;
+  connectionNotice: HTMLElement;
   liveStatus: HTMLElement;
   pair: HTMLElement;
   pairErr: HTMLElement;
@@ -908,7 +909,7 @@ export function startRenderer(
     const announcement = {
       live: "Connected",
       connecting: "Connecting\u2026",
-      reconnecting: "Connection lost \u2014 retrying in " + (shown.detail || "a moment"),
+      reconnecting: shown.detail || "Connection lost — reconnecting",
       replaying: "Restoring retained scans",
       stale: "Feed is stale",
       offline: "Can't reach the dashboard" + (shown.detail ? " (" + shown.detail + ")" : ""),
@@ -918,6 +919,9 @@ export function startRenderer(
       warn: shown.detail || "Warning",
     }[shown.state];
     currentStatus = shown;
+    const connectionNotice = $("connectionNotice");
+    connectionNotice.hidden = !["reconnecting", "offline", "error"].includes(shown.state);
+    connectionNotice.textContent = connectionNotice.hidden ? "" : announcement;
     paintConnectionStatus();
     $("liveStatus").textContent = announcement;
     if (

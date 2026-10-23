@@ -669,6 +669,22 @@ async function run(): Promise<void> {
   );
   api.emitStatus({ state: "offline", detail: "timeout" });
   ok("connection failure is announced", status?.textContent?.includes("timeout"));
+  const connectionNotice = document.getElementById("connectionNotice");
+  const limitDetail = "Too many viewers open for this Discord account (maximum 4). Retrying in 2s.";
+  api.emitStatus({ state: "reconnecting", detail: limitDetail });
+  ok(
+    "connection-limit error is visible without hovering",
+    !connectionNotice?.hidden && connectionNotice?.textContent === limitDetail,
+  );
+  ok(
+    "connection-limit error reaches tooltip and live announcement",
+    status?.textContent?.includes(limitDetail) && liveStatus?.textContent === limitDetail,
+  );
+  api.emitStatus({ state: "live" });
+  ok(
+    "successful reconnect removes the error banner",
+    connectionNotice?.hidden && connectionNotice.textContent === "",
+  );
   api.emitClip({ ...emptyClipboard(), on: true, sentKind: "fit", delivered: 1 });
   const clipboardMessage = liveStatus?.textContent;
   runtime.intervals.forEach((callback) => callback());
