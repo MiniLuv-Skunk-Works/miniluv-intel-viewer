@@ -69,6 +69,9 @@ connect it to another dashboard.
   with CCP ESI before relay to the paired dashboard
 - Replay recovery after brief network interruptions
 - Connection freshness, last-event time, and privacy-safe diagnostics
+- Visible connection-limit errors that remain available while the viewer retries;
+  a full account allows four simultaneous viewer connections, including any
+  old connections still waiting to expire on the dashboard
 - Independent compact feed filters using text and minimum split value
 - Opt-in desktop alerts with quiet hours, persistent mute, and configurable
   split-value, hull, system, or route conditions

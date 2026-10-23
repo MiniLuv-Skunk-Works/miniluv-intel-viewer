@@ -21,6 +21,7 @@ export class MockDashboard {
   readonly token = "phase-five-test-token";
   readonly vocabulary = ["tritanium", "pyerite", "damage control ii", "obelisk"];
   url = "";
+  feedLimitError: string | null = null;
 
   constructor() {
     this.server.on("connection", (socket) => {
@@ -199,6 +200,11 @@ export class MockDashboard {
       return;
     }
     if (path === "/api/feed" && request.method === "GET") {
+      if (this.feedLimitError !== null) {
+        response.writeHead(429, { "content-type": "text/plain; charset=utf-8" });
+        response.end(this.feedLimitError);
+        return;
+      }
       response.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",

@@ -494,8 +494,8 @@ export class ViewerController {
       this.diagnosticsRecorder.record("feed-invalid");
     else this.diagnosticsRecorder.record("feed-unreachable");
     this.emitStatus({
-      state: "offline",
-      detail: status.state === "reconnecting" ? `Retrying in ${detail}` : detail,
+      state: status.state === "reconnecting" ? "reconnecting" : "offline",
+      detail,
     });
   }
 

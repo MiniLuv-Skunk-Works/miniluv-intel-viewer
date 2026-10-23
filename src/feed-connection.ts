@@ -51,6 +51,20 @@ const DEFAULT_MAX_FRAME_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MINIMUM_RETRY_MS = 1_000;
 const DEFAULT_MAXIMUM_RETRY_MS = 30_000;
 const MAX_SEEN_FEED_REVISION_IDS = 1_024;
+const MAX_ERROR_BODY_BYTES = 1_024;
+
+function connectionLimitMessage(body: string): string {
+  // Recognize the dashboard's messages; never render arbitrary proxy HTML or
+  // unbounded server text in the overlay.
+  switch (body.trim()) {
+    case "too many viewers open for this account":
+      return "Too many viewers open for this Discord account (maximum 4). Close another viewer or wait for an old connection to expire.";
+    case "viewer connection capacity reached":
+      return "The dashboard has reached its viewer connection capacity. Wait for a connection slot to become available.";
+    default:
+      return "The dashboard is limiting viewer connections (HTTP 429). Wait before reconnecting.";
+  }
+}
 
 function defaultRequest(
   url: URL,
@@ -154,6 +168,7 @@ export class FeedConnectionManager {
   private idleTimer: Timer | null = null;
   private staleTimer: Timer | null = null;
   private retryMs: number;
+  private retryDetail: string | null = null;
   private replayEnabled = false;
   private lastEventId: string | null = null;
   private readonly seenFeedRevisionIds = new Set<string>();
@@ -180,6 +195,7 @@ export class FeedConnectionManager {
     this.clearAll();
     this.session = { ...session };
     this.retryMs = this.minimumRetryMs;
+    this.retryDetail = null;
     this.resetReplay();
     this.connect(this.generation);
   }
@@ -189,6 +205,7 @@ export class FeedConnectionManager {
     this.session = null;
     this.clearAll();
     this.retryMs = this.minimumRetryMs;
+    this.retryDetail = null;
     this.resetReplay();
   }
 
@@ -208,7 +225,11 @@ export class FeedConnectionManager {
     const parser = new SseParser(this.maxFrameBytes);
     let active = false;
     let stale = false;
-    this.callbacks.onStatus({ state: "connecting" });
+    this.callbacks.onStatus(
+      this.retryDetail
+        ? { state: "reconnecting", detail: `${this.retryDetail} Retrying now.` }
+        : { state: "connecting" },
+    );
 
     const armResponseTimer = (): void => {
       if (!this.current(generation) || this.responseTimer) return;
@@ -250,10 +271,35 @@ export class FeedConnectionManager {
             this.callbacks.onUnauthorized();
             return;
           }
+          if (status === 429) {
+            let body = "";
+            let bytes = 0;
+            const finish = (): void => {
+              if (!this.current(generation) || res !== this.response) return;
+              this.scheduleRetry(generation, connectionLimitMessage(body));
+            };
+            res.setEncoding("utf8");
+            this.responseTimer = this.setTimer(finish, this.responseTimeoutMs);
+            res.on("data", (chunk: string) => {
+              if (!this.current(generation) || res !== this.response) return;
+              bytes += Buffer.byteLength(chunk);
+              if (bytes > MAX_ERROR_BODY_BYTES) {
+                body = "";
+                finish();
+                return;
+              }
+              body += chunk;
+            });
+            res.once("end", finish);
+            res.on("error", finish);
+            res.once("aborted", finish);
+            res.once("close", finish);
+            return;
+          }
           if (status !== 200) {
             res.resume();
             this.callbacks.onStatus({ state: "error", detail: "server returned " + status });
-            this.scheduleRetry(generation);
+            this.scheduleRetry(generation, "The dashboard returned HTTP " + status + ".");
             return;
           }
           if (!eventStreamContentType(res.headers["content-type"])) {
@@ -263,6 +309,7 @@ export class FeedConnectionManager {
             return;
           }
 
+          this.retryDetail = null;
           this.callbacks.onStatus({ state: "live" });
           res.setEncoding("utf8");
           const armActivityTimers = (): void => {
@@ -327,15 +374,16 @@ export class FeedConnectionManager {
       socket.once(event, armResponseTimer);
     });
     req.on("error", () => {
-      if (!this.current(generation)) return;
+      if (!this.current(generation) || req !== this.request) return;
       this.callbacks.onStatus({ state: "offline", detail: "could not connect to dashboard" });
       this.scheduleRetry(generation);
     });
     req.end();
   }
 
-  private scheduleRetry(generation: number): void {
+  private scheduleRetry(generation: number, detail?: string): void {
     if (!this.current(generation) || this.retryTimer) return;
+    if (detail !== undefined) this.retryDetail = detail;
     const nominal = this.retryMs;
     this.retryMs = Math.min(this.retryMs * 2, this.maximumRetryMs);
     const delay = Math.round(nominal * (0.5 + Math.max(0, Math.min(1, this.random())) * 0.5));
@@ -346,7 +394,11 @@ export class FeedConnectionManager {
     this.clearConnection();
     this.callbacks.onStatus({
       state: "reconnecting",
-      detail: Math.max(1, Math.round(delay / 1_000)) + "s",
+      detail:
+        (this.retryDetail ? this.retryDetail + " " : "") +
+        "Retrying in " +
+        Math.max(1, Math.round(delay / 1_000)) +
+        "s.",
     });
   }
 
