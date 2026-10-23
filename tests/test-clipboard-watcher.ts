@@ -5,6 +5,148 @@ import type { ClipboardCapture } from "../src/contracts";
 
 const VOCABULARY = new Set(["tritanium", "pyerite", "damage", "control", "ii"]);
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((accept, fail) => {
+    resolve = accept;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+function asyncWatcher(readText: () => Promise<string>, foreground = async () => true) {
+  const captures: ClipboardCapture[] = [];
+  const watcher = new ClipboardWatcher({
+    readText,
+    foregroundProbe: { isEveClientForeground: foreground },
+    pilotValidator: { validate: async () => null },
+    setInterval: () => 1 as unknown as NodeJS.Timeout,
+    clearInterval: () => undefined,
+    onCapture: (capture) => captures.push(capture),
+    onIgnored: () => undefined,
+  });
+  watcher.setVocabulary(VOCABULARY);
+  return { watcher, captures };
+}
+
+describe("asynchronous clipboard reads", () => {
+  it("waits for the initial baseline and never relays pre-existing clipboard text", async () => {
+    const baseline = deferred<string>();
+    let text = "Tritanium\t100\nPyerite\t200";
+    let reads = 0;
+    const { watcher, captures } = asyncWatcher(() =>
+      ++reads === 1 ? baseline.promise : Promise.resolve(text),
+    );
+    watcher.start();
+    const pending = watcher.poll();
+    assert.equal(reads, 1);
+    baseline.resolve(text);
+    await pending;
+    assert.deepEqual(captures, []);
+    text = "Tritanium\t300\nPyerite\t400";
+    await watcher.poll();
+    assert.deepEqual(captures, [{ kind: "cargo", text }]);
+    watcher.stop();
+  });
+
+  it("seeds from the first successful read if the initial baseline rejects", async () => {
+    let reads = 0;
+    let text = "Tritanium\t100\nPyerite\t200";
+    const { watcher, captures } = asyncWatcher(async () => {
+      if (++reads === 1) throw new Error("clipboard busy");
+      return text;
+    });
+    watcher.start();
+    await watcher.poll();
+    assert.deepEqual(captures, []);
+    text = "Tritanium\t300\nPyerite\t400";
+    await watcher.poll();
+    assert.deepEqual(captures, [{ kind: "cargo", text }]);
+    watcher.stop();
+  });
+
+  it("discards a read that completes after watching stops", async () => {
+    const read = deferred<string>();
+    const { watcher, captures } = asyncWatcher(() => read.promise);
+    const pending = watcher.poll();
+    watcher.stop();
+    read.resolve("Tritanium\t100\nPyerite\t200");
+    await pending;
+    assert.deepEqual(captures, []);
+  });
+
+  it("does not let an old baseline overwrite a restarted watcher's baseline", async () => {
+    const oldBaseline = deferred<string>();
+    const newBaseline = deferred<string>();
+    const text = "Tritanium\t100\nPyerite\t200";
+    let reads = 0;
+    const { watcher, captures } = asyncWatcher(() => {
+      reads += 1;
+      return reads === 1
+        ? oldBaseline.promise
+        : reads === 2
+          ? newBaseline.promise
+          : Promise.resolve(text);
+    });
+    watcher.start();
+    watcher.stop();
+    watcher.start();
+    newBaseline.resolve(text);
+    await watcher.poll();
+    oldBaseline.resolve("old clipboard");
+    await watcher.poll();
+    assert.deepEqual(captures, []);
+    watcher.stop();
+  });
+
+  it("discards out-of-order reads without replacing the newest observed value", async () => {
+    const oldRead = deferred<string>();
+    const newRead = deferred<string>();
+    const text = "Tritanium\t300\nPyerite\t400";
+    let reads = 0;
+    const { watcher, captures } = asyncWatcher(() => {
+      reads += 1;
+      return reads === 1 ? oldRead.promise : reads === 2 ? newRead.promise : Promise.resolve(text);
+    });
+    const oldPoll = watcher.poll();
+    const newPoll = watcher.poll();
+    newRead.resolve(text);
+    await newPoll;
+    oldRead.resolve("Tritanium\t100\nPyerite\t200");
+    await oldPoll;
+    await watcher.poll();
+    assert.deepEqual(captures, [{ kind: "cargo", text }]);
+  });
+
+  for (const initiallyForeground of [true, false]) {
+    it(`rejects a read when EVE focus changes from ${initiallyForeground}`, async () => {
+      let foreground = initiallyForeground;
+      const read = deferred<string>();
+      const { watcher, captures } = asyncWatcher(
+        () => read.promise,
+        async () => foreground,
+      );
+      const pending = watcher.poll();
+      foreground = !foreground;
+      read.resolve("Tritanium\t100\nPyerite\t200");
+      await pending;
+      foreground = true;
+      await watcher.poll();
+      assert.deepEqual(captures, []);
+      assert.equal(watcher.stats().ignored, 1);
+    });
+  }
+
+  it("contains rejected clipboard reads", async () => {
+    const { watcher, captures } = asyncWatcher(async () => {
+      throw new Error("clipboard unavailable");
+    });
+    await assert.doesNotReject(watcher.poll());
+    assert.deepEqual(captures, []);
+  });
+});
+
 describe("ClipboardWatcher", () => {
   it("binds one foreground result to each new value and never reconsiders a rejection", async () => {
     let clipboard = "already copied";

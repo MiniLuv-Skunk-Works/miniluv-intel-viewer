@@ -9,7 +9,7 @@ export interface ClipboardWatcherCallbacks {
 }
 
 export interface ClipboardWatcherOptions extends ClipboardWatcherCallbacks {
-  readText(): string;
+  readText(): string | Promise<string>;
   foregroundProbe: ForegroundApplicationProbe;
   pilotValidator: PilotNameValidation;
   setInterval?: (callback: () => void, delay: number) => NodeJS.Timeout;
@@ -21,7 +21,7 @@ export interface ClipboardWatcherOptions extends ClipboardWatcherCallbacks {
 const DEFAULT_POLL_MS = 500;
 
 export class ClipboardWatcher {
-  private readonly readText: () => string;
+  private readonly readText: () => string | Promise<string>;
   private readonly onCapture: (capture: ClipboardCapture) => void;
   private readonly onIgnored: (needsVocabulary: boolean) => void;
   private readonly foregroundProbe: ForegroundApplicationProbe;
@@ -31,7 +31,10 @@ export class ClipboardWatcher {
   private readonly pollMs: number;
   private readonly now: () => number;
   private timer: NodeJS.Timeout | null = null;
-  private lastText = "";
+  private lastText: string | null = "";
+  private lifecycle = 0;
+  private readSequence = 0;
+  private baseline: Promise<void> | null = null;
   private vocabulary: ReadonlySet<string> | null = null;
   private generation = 0;
   private detectPilot = false;
@@ -51,17 +54,18 @@ export class ClipboardWatcher {
 
   start(): void {
     if (this.timer) return;
-    try {
-      this.lastText = this.readText();
-    } catch {
-      this.lastText = "";
-    }
+    const lifecycle = ++this.lifecycle;
+    this.lastText = null;
+    this.baseline = this.seedBaseline(lifecycle);
     this.timer = this.setTimer(() => {
       void this.poll();
     }, this.pollMs);
   }
 
   stop(): void {
+    this.lifecycle += 1;
+    this.readSequence += 1;
+    this.baseline = null;
     this.generation += 1;
     if (!this.timer) return;
     this.clearTimer(this.timer);
@@ -97,20 +101,32 @@ export class ClipboardWatcher {
   }
 
   async poll(): Promise<void> {
+    const lifecycle = this.lifecycle;
+    if (this.baseline) await this.baseline;
+    if (lifecycle !== this.lifecycle) return;
+    const readSequence = ++this.readSequence;
+    // An asynchronous read may finish after focus changes. Require EVE on
+    // both sides of the read, and never classify a superseded read result.
+    const foregroundBefore = this.foregroundProbe.isEveClientForeground().catch(() => false);
     let text: string;
     try {
-      text = this.readText();
+      text = await this.readText();
     } catch {
       return;
     }
-    if (!text || text === this.lastText) return;
+    if (lifecycle !== this.lifecycle || readSequence !== this.readSequence) return;
+    const previousText = this.lastText;
+    if (text === previousText) return;
     this.lastText = text;
     const generation = ++this.generation;
+    // If the initial read failed, seed from the next successful read rather
+    // than relaying text that may have been copied before watching began.
+    if (previousText === null || !text) return;
 
-    // Polling leaves a narrow race if focus changes between clipboard mutation
-    // and this snapshot. Capture the text first and bind exactly one foreground
-    // result to this immutable generation; never reconsider a rejected value.
-    const eveForeground = await this.foregroundProbe.isEveClientForeground().catch(() => false);
+    const wasEveForeground = await foregroundBefore;
+    if (generation !== this.generation) return;
+    const eveForeground =
+      wasEveForeground && (await this.foregroundProbe.isEveClientForeground().catch(() => false));
     if (generation !== this.generation) return;
     if (!eveForeground) {
       this.ignore(false);
@@ -136,6 +152,15 @@ export class ClipboardWatcher {
     }
 
     this.ignore(this.vocabulary === null);
+  }
+
+  private async seedBaseline(lifecycle: number): Promise<void> {
+    try {
+      const text = await this.readText();
+      if (lifecycle === this.lifecycle) this.lastText = text;
+    } catch {
+      // The next successful poll becomes the baseline.
+    }
   }
 
   private ignore(needsVocabulary: boolean): void {

@@ -30,11 +30,13 @@ MILF Viewer uses Electron's main, preload, and renderer separation:
 
 ### Clipboard foreground gate
 
-Clipboard observation remains a 500 ms main-process poll. For each new value,
-the watcher snapshots the text and a generation before resolving the current
-foreground window through Win32 process APIs. That focus result is used once
-for that immutable generation, and unknown or non-EVE identities fail closed
-before classification or networking. Polling leaves a narrow race when focus
+Clipboard observation remains a 500 ms main-process poll. Electron 44 reads
+clipboard text asynchronously. The watcher seeds a baseline before considering
+new text and discards reads from earlier watch sessions or superseded polls.
+It checks the foreground window through Win32 process APIs before and after
+the read; both must identify EVE. Unknown or non-EVE identities fail closed
+before classification or networking, and rejected text is never reconsidered
+just because focus changes. Polling leaves a narrow race when focus
 changes between the user's copy and the next poll; automatic capture must move
 to a Windows clipboard-update notification if product requirements later need
 a tighter binding than this documented residual race.

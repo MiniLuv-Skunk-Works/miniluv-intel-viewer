@@ -135,7 +135,7 @@ Requirements:
 - Node.js 22.x
 - npm
 
-Electron 43 bundles Node.js 24 for the packaged runtime. Contributors and CI
+Electron 44 bundles Node.js 24 for the packaged runtime. Contributors and CI
 still use Node.js 22 as declared by `package.json`.
 
 Install the locked dependencies and run from source:
