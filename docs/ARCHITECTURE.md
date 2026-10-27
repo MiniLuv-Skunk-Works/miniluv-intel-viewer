@@ -30,7 +30,7 @@ MILF Viewer uses Electron's main, preload, and renderer separation:
 
 ### Clipboard foreground gate
 
-Clipboard observation remains a 500 ms main-process poll. Electron 44 reads
+Clipboard observation remains a 500 ms main-process poll. Electron reads
 clipboard text asynchronously. The watcher seeds a baseline before considering
 new text and discards reads from earlier watch sessions or superseded polls.
 It checks the foreground window through Win32 process APIs before and after
