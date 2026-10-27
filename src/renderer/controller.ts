@@ -1,5 +1,6 @@
 import {
   defaultUserPreferences,
+  FLEET_HULLS,
   parseCombatScenario,
   type ActiveBump,
   type CombatScenario,
@@ -41,6 +42,7 @@ interface Elements {
   pairBtn: HTMLButtonElement;
   opBtn: HTMLButtonElement;
   quitBtn: HTMLButtonElement;
+  minimizeBtn: HTMLButtonElement;
   pairCancel: HTMLButtonElement;
   detailClose: HTMLButtonElement;
   repairBtn: HTMLButtonElement;
@@ -73,6 +75,7 @@ interface Elements {
   settings: HTMLElement;
   settingsForm: HTMLFormElement;
   settingsErr: HTMLElement;
+  fleetShipOptions: HTMLElement;
   alertsEnabled: HTMLInputElement;
   alertValue: HTMLInputElement;
   alertHulls: HTMLInputElement;
@@ -322,8 +325,9 @@ export function startRenderer(
           "pre",
           undefined,
           ready.requirements
+            .filter((entry) => preferences.visibleFleetHulls.includes(entry.name))
             .map((entry) => String(entry.name).padEnd(9) + String(entry.ships).padStart(4))
-            .join("\n"),
+            .join("\n") || "No fleet requirements to show.",
         ),
       );
     } else {
@@ -437,6 +441,17 @@ export function startRenderer(
   }
 
   function fillSettings(): void {
+    $("fleetShipOptions").replaceChildren(
+      ...FLEET_HULLS.map((hull) => {
+        const label = element("label", "inline");
+        const input = element("input");
+        input.type = "checkbox";
+        input.value = hull;
+        input.checked = preferences.visibleFleetHulls.includes(hull);
+        label.append(input, doc.createTextNode(hull));
+        return label;
+      }),
+    );
     const alerts = preferences.alerts;
     $("alertsEnabled").checked = alerts.enabled;
     $("alertValue").value =
@@ -779,7 +794,9 @@ export function startRenderer(
       }
       open.append(row2);
     }
-    const fleet = ready?.requirements ?? [];
+    const fleet =
+      ready?.requirements.filter((entry) => preferences.visibleFleetHulls.includes(entry.name)) ??
+      [];
     if (fleet.length) {
       const fleetRow = element("div", "fleet");
       fleet.forEach((entry) => {
@@ -986,6 +1003,9 @@ export function startRenderer(
     applyOpacity(((opLevel + 1) % 3) as OpacityLevel);
     void api.setOpacity(opLevel);
   });
+  $("minimizeBtn").addEventListener("click", () => {
+    void api.minimize();
+  });
   $("quitBtn").addEventListener("click", () => {
     void api.quit();
   });
@@ -1097,12 +1117,18 @@ export function startRenderer(
       routes,
       quietHours: { enabled: $("quietEnabled").checked, startMinute, endMinute },
     };
+    const selectedHulls = Array.from(
+      $("fleetShipOptions").querySelectorAll<HTMLInputElement>("input:checked"),
+      (input) => input.value,
+    );
+    preferences.visibleFleetHulls = FLEET_HULLS.filter((hull) => selectedHulls.includes(hull));
     $("settingsSave").disabled = true;
     void api.savePreferences(preferences).then((saved) => {
       preferences = saved;
       $("settingsSave").disabled = false;
       paintMute();
       closeSettings();
+      repaintCalculations();
     });
   });
 

@@ -45,6 +45,7 @@ export interface RegisterIpcHandlersOptions {
   ipcMain: IpcMain;
   actions: ViewerActions;
   getWebContents(): WebContents | null;
+  minimize(): void;
   quit(): void;
 }
 
@@ -200,6 +201,14 @@ export function registerIpcHandlers(options: RegisterIpcHandlersOptions): () => 
     "openUpdate",
     () => false,
     (_event, input) => (parseNoArguments(input) ? options.actions.openUpdate() : false),
+  );
+
+  handle(
+    "minimize",
+    () => undefined,
+    (_event, input) => {
+      if (parseNoArguments(input)) options.minimize();
+    },
   );
 
   handle(

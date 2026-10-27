@@ -164,6 +164,7 @@ const disposeIpc = registerIpcHandlers({
     },
   },
   getWebContents: () => windowManager.getWebContents(),
+  minimize: () => windowManager.minimize(),
   quit: () => app.quit(),
 });
 

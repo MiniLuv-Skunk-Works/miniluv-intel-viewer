@@ -691,6 +691,11 @@
         border: 1px solid var(--control-border);
         border-radius: 4px;
       }
+      #fleetShipOptions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 4px 12px;
+      }
       .viewerActions {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -817,6 +822,9 @@
           title="Viewer settings"
         >
           settings
+        </button>
+        <button type="button" id="minimizeBtn" aria-label="Minimize MILF Viewer" title="Minimize">
+          &minus;
         </button>
         <button type="button" id="quitBtn" aria-label="Quit MILF Viewer" title="Quit">
           &times;
@@ -1038,6 +1046,13 @@
             names are sent to your paired dashboard. A short EVE chat phrase can still resemble a
             name and be checked with ESI.
           </p>
+        </fieldset>
+        <fieldset class="formGroup">
+          <legend>Fleet ships</legend>
+          <p class="settingDisclosure">
+            Choose the fleet requirements shown on scan cards and in details.
+          </p>
+          <div id="fleetShipOptions"></div>
         </fieldset>
         <fieldset class="formGroup">
           <legend>Desktop alerts</legend>

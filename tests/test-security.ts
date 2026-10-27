@@ -49,6 +49,7 @@ describe("main-process authority", () => {
       "diagnostics",
       "checkUpdate",
       "openUpdate",
+      "minimize",
       "close",
     ]) {
       assert.match(handlers, new RegExp(`handle\\(\\s*"${channel}"`));

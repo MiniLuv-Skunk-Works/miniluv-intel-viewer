@@ -30,7 +30,7 @@ MILF Viewer uses Electron's main, preload, and renderer separation:
 
 ### Clipboard foreground gate
 
-Clipboard observation remains a 500 ms main-process poll. Electron 44 reads
+Clipboard observation remains a 500 ms main-process poll. Electron reads
 clipboard text asynchronously. The watcher seeds a baseline before considering
 new text and discards reads from earlier watch sessions or superseded polls.
 It checks the foreground window through Win32 process APIs before and after
@@ -114,6 +114,13 @@ choices, EHP, DPS, fleet requirements, or the dashboard's private tank context.
 The scenario-calculation contract accepts 1 to 25 unique scan IDs and a complete
 `{ state, securityStatus, tankState, implant }` scenario. Its response preserves
 request order and classifies each ID as `ready`, `unavailable`, or `not-found`.
+Ready results accept up to six fleet requirement rows: Talos, T2 Cat, T1 Cat,
+Hound, Purifier, and Cenotaph. Unknown hull names and invalid ship counts are
+rejected.
+Local `visibleFleetHulls` preferences select which requirement rows appear on
+cards and in details. All ships are shown by default for older settings; an
+empty selection hides every fleet row. Visibility changes reuse calculated
+results without requesting new calculations.
 The renderer persists one local combat scenario, keeps calculation results in a
 map separate from scan facts, and renders cards and details from that map. It
 batches the retained replay after replay settles, refreshes one stable scan ID
