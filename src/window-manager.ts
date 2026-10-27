@@ -114,8 +114,14 @@ export class WindowManager {
 
   show(): void {
     if (!this.window || this.window.isDestroyed()) return;
+    if (this.window.isMinimized()) this.window.restore();
     this.window.show();
     this.window.focus();
+  }
+
+  minimize(): void {
+    if (!this.window || this.window.isDestroyed()) return;
+    this.window.minimize();
   }
 
   beginShutdown(): void {
@@ -152,7 +158,9 @@ export class WindowManager {
   }
 
   private rememberBounds(): void {
-    if (this.quitting || !this.window || this.window.isDestroyed()) return;
+    if (this.quitting || !this.window || this.window.isDestroyed() || this.window.isMinimized()) {
+      return;
+    }
     const placement = captureWindowPlacement(
       this.window.getBounds(),
       this.attachedDisplays(),
@@ -184,7 +192,7 @@ export class WindowManager {
     );
     this.window.setBounds(bounds);
     this.rememberBounds();
-    this.window.show();
+    this.show();
   }
 
   private createTray(): void {

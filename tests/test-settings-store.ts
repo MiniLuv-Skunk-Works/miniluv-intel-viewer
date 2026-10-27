@@ -173,6 +173,7 @@ async function run(): Promise<void> {
   console.log("\n=== combat scenario settings migration ===");
   const legacyPreferences = defaultUserPreferences() as unknown as Record<string, unknown>;
   delete legacyPreferences.combatScenario;
+  delete legacyPreferences.visibleFleetHulls;
   const migrationFs = new MemoryFileSystem();
   migrationFs.files.set(file, JSON.stringify({ preferences: legacyPreferences }));
   const migrated = new SettingsStore(file, parseSettingsDocument, {
@@ -184,11 +185,13 @@ async function run(): Promise<void> {
   ok(
     "older preferences gain defaults without corrupt-file handling",
     migrated.get().preferences?.combatScenario.state === "prepped" &&
+      migrated.get().preferences?.visibleFleetHulls.length === 6 &&
       ![...migrationFs.files.keys()].some((name) => name.includes(".corrupt-")),
   );
   await migrated.saveNow({
     preferences: {
       ...migrated.get().preferences!,
+      visibleFleetHulls: ["Talos", "Cenotaph"],
       combatScenario: {
         state: "unprepped",
         securityStatus: "0.9",
@@ -205,7 +208,8 @@ async function run(): Promise<void> {
   ok(
     "combat scenario persists across settings-store restarts",
     restarted.get().preferences?.combatScenario.tankState === "overheated" &&
-      restarted.get().preferences?.combatScenario.implant === "nirvana",
+      restarted.get().preferences?.combatScenario.implant === "nirvana" &&
+      restarted.get().preferences?.visibleFleetHulls.join(",") === "Talos,Cenotaph",
   );
 
   console.log("\n=== corrupt and interrupted files ===");

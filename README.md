@@ -61,7 +61,9 @@ connect it to another dashboard.
 - Server-authoritative EHP and fleet calculations requested in bounded batches,
   with unavailable or expired results shown explicitly
 - Expandable fit and cargo details
+- Per-ship fleet visibility toggles in settings, saved across restarts
 - Always-on-top, resizable Windows overlay with three opacity levels
+- Header minimize control, with restoration from the taskbar or tray
 - Per-scan bump controls and locally counted countdown timers
 - Tray controls for showing, clearing, repositioning, and re-pairing
 - Optional, foreground-gated clipboard watching for EVE fits and cargo lists

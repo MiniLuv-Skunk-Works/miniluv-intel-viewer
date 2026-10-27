@@ -107,6 +107,9 @@ const api: ViewerApi = {
       error: "Invalid update response.",
     },
   openUpdate: async () => (await invokeUnknown("openUpdate", undefined)) === true,
+  minimize: async () => {
+    await invokeUnknown("minimize", undefined);
+  },
   quit: async () => {
     await invokeUnknown("close", undefined);
   },

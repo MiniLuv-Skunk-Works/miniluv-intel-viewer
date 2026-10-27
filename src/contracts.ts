@@ -11,6 +11,16 @@ import {
 export type ClipboardKind = "fit" | "cargo" | "pilot";
 export type OpacityLevel = 0 | 1 | 2;
 
+export const FLEET_HULLS = Object.freeze([
+  "Talos",
+  "T2 Cat",
+  "T1 Cat",
+  "Hound",
+  "Purifier",
+  "Cenotaph",
+] as const);
+export type FleetHull = (typeof FLEET_HULLS)[number];
+
 export interface QuietHours {
   enabled: boolean;
   startMinute: number;
@@ -37,6 +47,7 @@ export interface UserPreferences {
   alerts: AlertPreferences;
   filters: FilterPreferences;
   combatScenario: CombatScenario;
+  visibleFleetHulls: FleetHull[];
 }
 
 export const DEFAULT_USER_PREFERENCES: Readonly<UserPreferences> = Object.freeze({
@@ -51,6 +62,7 @@ export const DEFAULT_USER_PREFERENCES: Readonly<UserPreferences> = Object.freeze
     quietHours: Object.freeze({ enabled: false, startMinute: 22 * 60, endMinute: 7 * 60 }),
   }),
   filters: Object.freeze({ query: "", minimumSplitValue: null }),
+  visibleFleetHulls: FLEET_HULLS as unknown as FleetHull[],
   combatScenario: Object.freeze({
     state: "prepped",
     securityStatus: "0.5",
@@ -70,6 +82,7 @@ export function defaultUserPreferences(): UserPreferences {
     },
     filters: { ...DEFAULT_USER_PREFERENCES.filters },
     combatScenario: { ...DEFAULT_USER_PREFERENCES.combatScenario },
+    visibleFleetHulls: [...FLEET_HULLS],
   };
 }
 
@@ -200,7 +213,6 @@ export type FleetState = "prepped" | "unprepped";
 export type SecurityStatus = "1" | "0.5" | "0.6" | "0.7" | "0.8" | "0.9";
 export type TankState = "passive" | "active" | "overheated";
 export type ImplantChoice = "none" | "amulet" | "nirvana";
-export type FleetHull = "Talos" | "T2 Cat" | "T1 Cat" | "Hound" | "Purifier";
 
 export interface CombatScenario {
   state: FleetState;
@@ -388,6 +400,7 @@ export interface IpcInvokeContract {
   diagnostics: { request: undefined; result: DiagnosticsSnapshot };
   checkUpdate: { request: undefined; result: UpdateInfo };
   openUpdate: { request: undefined; result: boolean };
+  minimize: { request: undefined; result: void };
   close: { request: undefined; result: void };
 }
 
@@ -420,6 +433,7 @@ export interface ViewerApi {
   diagnostics(): Promise<DiagnosticsSnapshot>;
   checkUpdate(): Promise<UpdateInfo>;
   openUpdate(): Promise<boolean>;
+  minimize(): Promise<void>;
   quit(): Promise<void>;
   onScan(listener: (scan: Scan) => void): void;
   onScanRemoved(listener: (event: ScanRemovedEvent) => void): void;
@@ -535,7 +549,21 @@ function parseNullableSplitValue(value: unknown): number | null | undefined {
 
 export function parseUserPreferences(value: unknown): UserPreferences | null {
   const source = plainRecord(value);
-  if (!source || !hasOnlyKeys(source, ["alerts", "filters", "combatScenario"])) return null;
+  if (
+    !source ||
+    !hasOnlyKeys(source, ["alerts", "filters", "combatScenario", "visibleFleetHulls"])
+  ) {
+    return null;
+  }
+  const visibleFleetHulls: FleetHull[] = [];
+  const fleetHulls =
+    source.visibleFleetHulls === undefined ? FLEET_HULLS : source.visibleFleetHulls;
+  if (!Array.isArray(fleetHulls) || fleetHulls.length > FLEET_HULLS.length) return null;
+  for (const value of fleetHulls as unknown[]) {
+    const hull = FLEET_HULLS.find((hull) => hull === value);
+    if (!hull || visibleFleetHulls.includes(hull)) return null;
+    visibleFleetHulls.push(hull);
+  }
   const alerts = plainRecord(source.alerts);
   const filters = plainRecord(source.filters);
   if (
@@ -608,6 +636,7 @@ export function parseUserPreferences(value: unknown): UserPreferences | null {
     },
     filters: { query: query.trim(), minimumSplitValue: filterMinimumSplitValue },
     combatScenario,
+    visibleFleetHulls,
   };
 }
 
@@ -794,8 +823,6 @@ export function parseScan(value: unknown): Scan | null {
   target.cargoList = cargo;
   return target;
 }
-
-const FLEET_HULLS: readonly FleetHull[] = ["Talos", "T2 Cat", "T1 Cat", "Hound", "Purifier"];
 
 export function parseCombatScenario(value: unknown): CombatScenario | null {
   const source = plainRecord(value);

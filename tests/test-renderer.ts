@@ -117,6 +117,7 @@ class FakeApi implements ViewerApi {
             { name: "T1 Cat" as const, ships: 27 },
             { name: "Hound" as const, ships: 8 },
             { name: "Purifier" as const, ships: 8 },
+            { name: "Cenotaph" as const, ships: 4 },
           ],
         })),
       },
@@ -138,6 +139,9 @@ class FakeApi implements ViewerApi {
     return Promise.resolve(true);
   }
   quit(): Promise<void> {
+    return Promise.resolve();
+  }
+  minimize(): Promise<void> {
     return Promise.resolve();
   }
   onScan(listener: (scan: Scan) => void): void {
@@ -332,6 +336,67 @@ async function run(): Promise<void> {
       articleFor("Scenario Hull A")?.textContent?.includes("YES") &&
       !articleFor("Scenario Hull A")?.textContent?.includes("Active tank") &&
       !articleFor("Scenario Hull A")?.textContent?.includes("Prepped"),
+  );
+  console.log("\n=== saved fleet ship visibility ===");
+  const callsBeforeVisibility = api.calculationCalls.length;
+  document.getElementById("settingsBtn")?.click();
+  const shipInputs = (): HTMLInputElement[] =>
+    Array.from(document.querySelectorAll<HTMLInputElement>("#fleetShipOptions input"));
+  ok(
+    "all six fleet ship toggles default on",
+    shipInputs().length === 6 && shipInputs().every((input) => input.checked),
+  );
+  shipInputs().forEach((input) => {
+    input.checked = input.value === "Cenotaph";
+  });
+  document.getElementById("settingsSave")?.click();
+  await flush();
+  ok(
+    "saving toggles filters existing cards without recalculating",
+    articleFor("Scenario Hull A")?.querySelectorAll(".fleetRequirement").length === 1 &&
+      articleFor("Scenario Hull A")?.textContent?.includes("4 Cenotaph") &&
+      api.calculationCalls.length === callsBeforeVisibility,
+  );
+  articleFor("Scenario Hull A")?.querySelector<HTMLElement>(".scanOpen")?.click();
+  ok(
+    "details honor ship visibility",
+    document.querySelector("#detailBody pre")?.textContent?.includes("Cenotaph") &&
+      !document.querySelector("#detailBody pre")?.textContent?.includes("Talos"),
+  );
+  document.getElementById("detailClose")?.click();
+  document.getElementById("settingsBtn")?.click();
+  ok(
+    "reopening settings restores the selection",
+    shipInputs()
+      .filter((input) => input.checked)
+      .map((input) => input.value)
+      .join(",") === "Cenotaph",
+  );
+  shipInputs().forEach((input) => {
+    input.checked = false;
+  });
+  document.getElementById("settingsSave")?.click();
+  await flush();
+  ok(
+    "all ships can be hidden while tank values remain visible",
+    articleFor("Scenario Hull A")?.querySelectorAll(".fleetRequirement").length === 0 &&
+      articleFor("Scenario Hull A")?.textContent?.includes("600k EHP"),
+  );
+  articleFor("Scenario Hull A")?.querySelector<HTMLElement>(".scanOpen")?.click();
+  ok(
+    "empty fleet selections have a clear detail state",
+    document.querySelector("#detailBody pre")?.textContent === "No fleet requirements to show.",
+  );
+  document.getElementById("detailClose")?.click();
+  document.getElementById("settingsBtn")?.click();
+  shipInputs().forEach((input) => {
+    input.checked = true;
+  });
+  document.getElementById("settingsSave")?.click();
+  await flush();
+  ok(
+    "ships can be enabled again",
+    articleFor("Scenario Hull A")?.querySelectorAll(".fleetRequirement").length === 6,
   );
   api.emitScan({ ...scan("scenario-a", "Scenario Hull A"), notes: "revised" });
   await flush();

@@ -79,6 +79,8 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     await expect(page.locator(".hull").first()).toHaveText(hostile);
     await expect(page.locator(".scan").first()).toContainText("600k EHP \u00B7 Void");
     await expect(page.locator(".scan").first()).toContainText("12 Talos");
+    await expect(page.locator(".scan").first().locator(".fleetRequirement")).toHaveCount(6);
+    await expect(page.locator(".scan").first()).toContainText("4 Cenotaph");
     const calculationRequestsBeforeToggle = dashboard.requests.filter(
       (request) => request.path === "/api/viewer/scenario-calculations",
     ).length;
@@ -92,9 +94,38 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     await page.locator(".scanOpen").first().click();
     await expect(page.locator("#detailBody")).toContainText("900,000 EHP");
     await expect(page.locator("#detailBody")).toContainText("Overheated tank");
+    await expect(page.locator("#detailBody pre").first()).toContainText(/Cenotaph\s+4/);
     await page.locator("#detailClose").click();
     await expect(page.locator("img[src='x']")).toHaveCount(0);
     expect(await page.evaluate(() => document.body.dataset.pwned)).toBeUndefined();
+    const boundsBeforeMinimize = await application.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]?.getBounds(),
+    );
+    await page.getByRole("button", { name: "Minimize MILF Viewer", exact: true }).click();
+    await expect
+      .poll(() =>
+        application!.evaluate(({ BrowserWindow }) =>
+          BrowserWindow.getAllWindows()[0]?.isMinimized(),
+        ),
+      )
+      .toBe(true);
+    // A second launch uses the same show action as the tray and alert clicks.
+    await application.evaluate(({ app }) => {
+      app.emit("second-instance", {}, [], "");
+    });
+    await expect
+      .poll(() =>
+        application!.evaluate(({ BrowserWindow }) =>
+          BrowserWindow.getAllWindows()[0]?.isMinimized(),
+        ),
+      )
+      .toBe(false);
+    expect(
+      await application.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0]?.getBounds(),
+      ),
+    ).toEqual(boundsBeforeMinimize);
+    await expect(page.locator(".scan").first()).toContainText("4 Cenotaph");
     const statusTooltip = page.locator("#status");
     await expect(statusTooltip).not.toBeVisible();
     await page.locator("#dot").hover();
@@ -111,10 +142,14 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     await expect(page.locator(".hull").first()).toHaveText(hostile);
 
     await page.locator("#settingsBtn").click();
+    await expect(page.getByRole("checkbox", { name: "Cenotaph", exact: true })).toBeChecked();
+    await page.getByRole("checkbox", { name: "Cenotaph", exact: true }).uncheck();
     await page.locator("#alertsEnabled").check();
     await page.locator("#alertHulls").fill("Obelisk");
     await page.locator("#settingsSave").click();
     await expect(page.locator("#settings")).not.toHaveClass(/show/);
+    await expect(page.locator(".scan").first().locator(".fleetRequirement")).toHaveCount(5);
+    await expect(page.locator(".scan").first()).not.toContainText("Cenotaph");
     await page.locator("#muteBtn").click();
     await expect(page.locator("#muteBtn")).toHaveAttribute("aria-pressed", "true");
 
@@ -214,6 +249,8 @@ test("real Electron pairing, containment, reconnect, clipboard, restoration, and
     await expect(page.locator("#muteBtn")).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator("#scenarioTank")).toHaveValue("overheated");
     await page.locator("#settingsBtn").click();
+    await expect(page.getByRole("checkbox", { name: "Cenotaph", exact: true })).not.toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "Talos", exact: true })).toBeChecked();
     await page.locator("#repairBtn").click();
     await expect(page.locator("#pair")).toHaveClass(/show/);
     await expect(page.locator("#pairCancel")).toBeHidden();

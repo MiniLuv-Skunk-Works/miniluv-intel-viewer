@@ -571,12 +571,73 @@ const scenario = {
 };
 ok("combat scenario parses", parseCombatScenario(scenario)?.tankState === "active");
 ok("invalid implant rejects", parseCombatScenario({ ...scenario, implant: "both" }) === null);
+const fleetResponse = {
+  scenario,
+  results: [
+    {
+      scanId: "scan-six-hulls",
+      status: "ready",
+      tank: {
+        selectedProfile: "Void (kin/therm)",
+        selectedEhp: 603301,
+        ehpByProfile: { "Void (kin/therm)": 603301 },
+        overridden: false,
+      },
+      requirements: [
+        { name: "Talos", ships: 13 },
+        { name: "T2 Cat", ships: 32 },
+        { name: "T1 Cat", ships: 45 },
+        { name: "Hound", ships: 17 },
+        { name: "Purifier", ships: 19 },
+        { name: "Cenotaph", ships: 4 },
+      ],
+    },
+  ],
+};
+const parsedFleetResponse = parseViewerScenarioCalculationResponse(fleetResponse);
+ok(
+  "dashboard calculations accept all six fleet hulls including Cenotaph",
+  parsedFleetResponse?.results[0]?.status === "ready" &&
+    parsedFleetResponse.results[0].requirements.length === 6 &&
+    parsedFleetResponse.results[0].requirements[5]?.name === "Cenotaph" &&
+    parsedFleetResponse.results[0].requirements[5]?.ships === 4,
+);
+function withRequirements(requirements: unknown): unknown {
+  return { ...fleetResponse, results: [{ ...fleetResponse.results[0], requirements }] };
+}
+ok(
+  "fleet calculations still reject unknown hulls, oversized lists, and invalid ship counts",
+  parseViewerScenarioCalculationResponse(withRequirements([{ name: "Tornado", ships: 1 }])) ===
+    null &&
+    parseViewerScenarioCalculationResponse(
+      withRequirements([...fleetResponse.results[0]!.requirements, { name: "Talos", ships: 1 }]),
+    ) === null &&
+    [0, -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1].every(
+      (ships) =>
+        parseViewerScenarioCalculationResponse(withRequirements([{ name: "Cenotaph", ships }])) ===
+        null,
+    ),
+);
 const legacyPreferences = defaultUserPreferences() as unknown as Record<string, unknown>;
 delete legacyPreferences.combatScenario;
+delete legacyPreferences.visibleFleetHulls;
 ok(
   "older preferences receive the safe universal scenario",
   parseUserPreferences(legacyPreferences)?.combatScenario.state === "prepped" &&
     parseUserPreferences(legacyPreferences)?.combatScenario.securityStatus === "0.5",
+);
+ok(
+  "older preferences show all fleet ships and empty selections remain empty",
+  parseUserPreferences(legacyPreferences)?.visibleFleetHulls.length === 6 &&
+    parseUserPreferences({ ...defaultUserPreferences(), visibleFleetHulls: [] })?.visibleFleetHulls
+      .length === 0,
+);
+ok(
+  "fleet preferences reject unknown hulls, duplicates, null, and oversized lists",
+  [["Tornado"], ["Talos", "Talos"], null, Array(7).fill("Talos")].every(
+    (visibleFleetHulls) =>
+      parseUserPreferences({ ...defaultUserPreferences(), visibleFleetHulls }) === null,
+  ),
 );
 ok(
   "explicit malformed scenarios do not silently reset",

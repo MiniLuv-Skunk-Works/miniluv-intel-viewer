@@ -194,6 +194,11 @@ export class MockDashboard {
               name: "Talos",
               ships: scenario.state === "unprepped" ? 18 : 12,
             },
+            { name: "T2 Cat", ships: 32 },
+            { name: "T1 Cat", ships: 45 },
+            { name: "Hound", ships: 17 },
+            { name: "Purifier", ships: 19 },
+            { name: "Cenotaph", ships: 4 },
           ],
         })),
       });

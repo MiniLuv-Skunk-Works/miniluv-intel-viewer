@@ -243,6 +243,7 @@ export class ViewerController {
           },
           filters: { ...stored.filters },
           combatScenario: { ...stored.combatScenario },
+          visibleFleetHulls: [...stored.visibleFleetHulls],
         }
       : defaultUserPreferences();
   }
